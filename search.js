@@ -1802,7 +1802,7 @@ function userResults(query) {
 
 function renderDocumentResult(result) {
   const { documentData, terms, matchedFields = [] } = result;
-  const title = documentData.type === "reply" ? `回复：${documentData.title}` : documentData.title || "无标题";
+  const title = documentData.type === "reply" ? `第 ${documentData.pos || 0} 楼回帖` : documentData.title || "无标题";
   const location = documentData.type === "reply" ? `第 ${documentData.pos || 0} 楼` : "主题帖";
   const labels = { title: "标题", content: "正文", author: "作者", authorName: "作者", board: "版面", boardDescription: "版面" };
   const matched = documentData.type === "reply"
