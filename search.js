@@ -1457,6 +1457,7 @@ function persistTasks() {
 
 async function restoreTasks() {
   const tasks = await getAll("tasks");
+  let restoredOnlineResults = false;
   tasks.forEach((task) => {
     if (!["online", "index"].includes(task.mode) || !Array.isArray(task.jobs)) return;
     task.jobs.forEach((job) => { if (job.status === "running") job.status = "pending"; });
@@ -1468,10 +1469,13 @@ async function restoreTasks() {
       state.onlineDocumentMap = new Map(state.onlineDocuments.map((doc) => [doc.id, doc]));
       state.onlineQuery = task.query;
       $("#query-input").value = task.query;
+      restoredOnlineResults = true;
     }
     delete task.results;
     updateTaskStatus(task);
   });
+  // 任务状态恢复后，初始化阶段的空结果视图也要同步到已恢复的关键词和结果。
+  if (restoredOnlineResults) renderResults();
 }
 
 function enqueuePage(task, kind, board, page = 1, post = null) {

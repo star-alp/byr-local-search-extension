@@ -217,6 +217,7 @@ const scenario = String.raw`
   assert(state.activeScopeId === state.scopePresets[0].id && readIndexOptions().boardPageLimit === 1, '重新打开后应恢复上次应用的范围');
   assert(state.tasks.online.phase === 'paused', '应能恢复暂停任务');
   assert(state.onlineDocuments.length > 0, '恢复应保留命中');
+  assert(document.querySelector('#result-list').textContent.includes('主题'), '恢复任务后结果列表应同步显示已保存的命中');
   selectScopePreset(state.scopePresets[1].id);
   assert(state.tasks.online.boards.length === 1 && state.tasks.online.options.boardPageLimit === 1, '切换范围不能改变已经暂停的任务');
   selectScopePreset(state.scopePresets[0].id);
