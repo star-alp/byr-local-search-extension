@@ -141,22 +141,21 @@ function installByrJumpHighlight() {
   };
 
   const findTarget = (request) => {
-    if (request.position) {
-      // nForum 旧版模板使用 <a name="a16"></a> 作为楼层锚点，不是 id 或 data-pos。
-      const anchor = document.getElementById(`a${request.position}`)
-        || document.querySelector(`[name="a${request.position}"]`)
-        || document.querySelector(`[data-pos="${request.position}"]`);
-      if (!anchor) return null;
-      const wrappedPost = anchor.closest(".a-wrap, article, .article-item, .topic-reply");
-      if (wrappedPost) return wrappedPost;
-      // 论坛模板的楼层锚点与帖子容器是兄弟节点：<a name="a16"></a><div class="a-wrap">…。
-      const sibling = anchor.nextElementSibling;
-      if (sibling?.matches(".a-wrap, article, .article-item, .topic-reply")) return sibling;
-      if (sibling?.matches("table.article")) return sibling;
-      const siblingPost = sibling?.querySelector(".a-wrap, article, .article-item, .topic-reply, table.article");
-      return siblingPost || null;
-    }
-    return document.querySelector("article, .article, .article-item, .topic-reply");
+    // 主题链接定位楼主 a0；页面横幅也有 article 类名，不能用它寻找第一篇帖子。
+    const position = request.position || "0";
+    // nForum 旧版模板使用 <a name="a16"></a> 作为楼层锚点，不是 id 或 data-pos。
+    const anchor = document.getElementById(`a${position}`)
+      || document.querySelector(`[name="a${position}"]`)
+      || document.querySelector(`[data-pos="${position}"]`);
+    if (!anchor) return null;
+    const wrappedPost = anchor.closest(".a-wrap, article, .article-item, .topic-reply");
+    if (wrappedPost) return wrappedPost;
+    // 论坛模板的楼层锚点与帖子容器是兄弟节点：<a name="a16"></a><div class="a-wrap">…。
+    const sibling = anchor.nextElementSibling;
+    if (sibling?.matches(".a-wrap, article, .article-item, .topic-reply")) return sibling;
+    if (sibling?.matches("table.article")) return sibling;
+    const siblingPost = sibling?.querySelector(".a-wrap, article, .article-item, .topic-reply, table.article");
+    return siblingPost || null;
   };
 
   const applyHighlight = (request, target) => {
@@ -182,11 +181,13 @@ function installByrJumpHighlight() {
     const attempt = () => {
       const target = findTarget(request);
       if (!target) return false;
+      if (target === highlighted) return true;
       applyHighlight(request, target);
       return true;
     };
-    if (attempt()) return;
-    observer = new MutationObserver(() => { if (attempt()) observer.disconnect(); });
+    // 单页路由可能先显示旧内容再替换，继续观察，直到真正的帖子容器渲染完成。
+    attempt();
+    observer = new MutationObserver(attempt);
     observer.observe(document.body, { childList: true, subtree: true });
     timer = window.setTimeout(() => observer?.disconnect(), 15000);
   };

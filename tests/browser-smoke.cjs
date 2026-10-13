@@ -383,6 +383,18 @@ const server = http.createServer((req, res) => {
   } else if (req.url === "/search.css") {
     res.setHeader("Content-Type", "text/css");
     res.end(read("search.css"));
+  } else if (req.url === "/content.js") {
+    res.setHeader("Content-Type", "application/javascript");
+    res.end(read("content.js"));
+  } else if (req.url === "/jump") {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.end(`<!doctype html><meta charset="utf-8"><title>论坛跳转高亮测试</title>
+      <div class="article" id="banner">论坛横幅</div><div id="posts"></div>
+      <script>globalThis.chrome={runtime:{onMessage:{addListener(){}},sendMessage(){}}};
+      globalThis.renderPosts=()=>{document.getElementById('posts').innerHTML=
+      '<a name="a0"></a><div class="a-wrap" id="post0"><table class="article"><tr><td>楼主正文</td></tr></table></div>'+
+      '<a name="a4"></a><div class="a-wrap" id="post4"><table class="article"><tr><td>第4楼回帖</td></tr></table></div>';};</script>
+      <script src="/content.js"></script><script>setTimeout(renderPosts,200);</script>`);
   } else {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.end(html);
@@ -476,6 +488,29 @@ server.listen(0, "127.0.0.1", () => {
         return layout;
       };
       result.layouts = [await checkLayout(false, 1280), await checkLayout(true, 1280), await checkLayout(false, 390), await checkLayout(true, 390), await checkLayout(false, 1280, true), await checkLayout(false, 390, true)];
+      // 使用真实 DOM 重现横幅与帖子共用 article 类，以及单页路由延迟替换正文。
+      await command('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/jump#!article/StudyShare/7?byr_highlight=资料' });
+      const waitForHighlight = async (id) => {
+        for (let count = 0; count < 50; count += 1) {
+          if (await evaluate(`document.querySelector('.byr-search-jump-highlight')?.id === '${id}'`)) return;
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        }
+        throw new Error('论坛跳转没有高亮指定帖子：' + id);
+      };
+      await waitForHighlight('post0');
+      if (await evaluate(`document.getElementById('banner').classList.contains('byr-search-jump-highlight')`)) throw new Error('主题跳转错误高亮了论坛横幅');
+      await evaluate(`location.hash='!article/StudyShare/7?p=1&byr_highlight=资料#a4'`);
+      await waitForHighlight('post4');
+      if (!await evaluate(`document.querySelector('.byr-search-jump-badge').textContent==='搜索命中 · 第 4 楼'`)) throw new Error('回帖高亮楼层标记错误');
+      await evaluate(`location.hash='!article/StudyShare/8?byr_highlight=资料';setTimeout(renderPosts,100)`);
+      await waitForHighlight('post0');
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await waitForHighlight('post0');
+      if (!await evaluate(`document.querySelectorAll('.byr-search-jump-badge').length===1`)) throw new Error('论坛重新渲染后应只保留一个高亮标记');
+      await evaluate(`location.hash='!board/StudyShare'`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (await evaluate(`!!document.querySelector('.byr-search-jump-highlight,.byr-search-jump-badge')`)) throw new Error('离开搜索目标后应清除高亮');
+      result.jumpHighlights = { thread: true, reply: true, delayedRender: true, bannerExcluded: true };
       console.log(JSON.stringify(result));
       if (!result.ok) process.exitCode = 1;
     } catch (error) {
