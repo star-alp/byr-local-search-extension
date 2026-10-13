@@ -146,7 +146,15 @@ function installByrJumpHighlight() {
       const anchor = document.getElementById(`a${request.position}`)
         || document.querySelector(`[name="a${request.position}"]`)
         || document.querySelector(`[data-pos="${request.position}"]`);
-      if (anchor) return anchor.closest("article, .article, .article-item, .topic-reply, li, tr") || anchor.parentElement;
+      if (!anchor) return null;
+      const wrappedPost = anchor.closest(".a-wrap, article, .article-item, .topic-reply");
+      if (wrappedPost) return wrappedPost;
+      // 论坛模板的楼层锚点与帖子容器是兄弟节点：<a name="a16"></a><div class="a-wrap">…。
+      const sibling = anchor.nextElementSibling;
+      if (sibling?.matches(".a-wrap, article, .article-item, .topic-reply")) return sibling;
+      if (sibling?.matches("table.article")) return sibling;
+      const siblingPost = sibling?.querySelector(".a-wrap, article, .article-item, .topic-reply, table.article");
+      return siblingPost || null;
     }
     return document.querySelector("article, .article, .article-item, .topic-reply");
   };
