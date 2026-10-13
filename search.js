@@ -1805,25 +1805,26 @@ function renderDocumentResult(result) {
   const title = documentData.type === "reply" ? `回复：${documentData.title}` : documentData.title || "无标题";
   const location = documentData.type === "reply" ? `第 ${documentData.pos || 0} 楼` : "主题帖";
   const labels = { title: "标题", content: "正文", author: "作者", authorName: "作者", board: "版面", boardDescription: "版面" };
-  const matched = [...new Set(matchedFields.map((key) => labels[key]))].join("、");
+  const matched = documentData.type === "reply"
+    ? (matchedFields.length ? "回帖" : "")
+    : [...new Set(matchedFields.map((key) => labels[key]))].join("、");
   return `<article class="result-card">
-    <h3 class="result-title"><a href="${escapeHtml(threadUrl(documentData, terms))}" target="_blank" rel="noreferrer">${highlight(title, terms)}</a></h3>
+    <a class="result-card-link" href="${escapeHtml(threadUrl(documentData, terms))}" target="_blank" rel="noreferrer">
+    <h3 class="result-title">${highlight(title, terms)}</h3>
     <div class="result-meta"><span class="result-kind">${documentData.type === "reply" ? "回帖" : "帖子"}</span><span>${escapeHtml(documentData.boardDescription || documentData.board)}</span><span>${escapeHtml(documentData.author || "已注销")}</span><span>${escapeHtml(location)}</span><span>${escapeHtml(formatTime(documentData.time))}</span>${matched ? `<span>命中：${matched}</span>` : ""}${documentData.nativeSearch ? '<span class="result-source">论坛快速匹配</span>' : ""}</div>
     ${state.searchMode === "online" && documentData.cachedAt ? `<p class="field-help">${documentData.cachePreview ? "缓存预览" : "缓存内容"} · ${escapeHtml(formatTime(documentData.cachedAt))} 获取</p>` : ""}
     ${documentData.content ? `<p class="result-snippet">${highlight(getSnippet(documentData.content, terms), terms)}</p>` : ""}
-    <div class="result-foot"><span>主题编号 ${escapeHtml(documentData.gid)}</span><a href="${escapeHtml(threadUrl(documentData, terms))}" target="_blank" rel="noreferrer">打开原文 ↗</a></div>
+    <div class="result-foot"><span>主题编号 ${escapeHtml(documentData.gid)}</span><span class="result-link-hint">${documentData.type === "reply" ? "跳到此楼" : "打开原文"} ↗</span></div>
+    </a>
   </article>`;
 }
 
 function renderMatchedReply(result) {
-  const { documentData, terms, matchedFields = [] } = result;
-  const labels = { content: "正文", author: "作者", authorName: "作者" };
-  const matched = [...new Set(matchedFields.map((key) => labels[key]).filter(Boolean))].join("、");
-  return `<div class="result-child">
-    <div class="result-child-meta"><span class="result-kind">回帖</span><span>${escapeHtml(documentData.author || "已注销")}</span><span>第 ${escapeHtml(documentData.pos || 0)} 楼</span><span>${escapeHtml(formatTime(documentData.time))}</span>${matched ? `<span>命中：${matched}</span>` : ""}</div>
+  const { documentData, terms } = result;
+  return `<a class="result-child" href="${escapeHtml(threadUrl(documentData, terms))}" target="_blank" rel="noreferrer">
+    <div class="result-child-meta"><span class="result-kind">回帖</span><span>${highlight(documentData.author || "已注销", terms)}</span><span>第 ${escapeHtml(documentData.pos || 0)} 楼</span><span>${escapeHtml(formatTime(documentData.time))}</span><span>命中：回帖</span><span class="result-link-hint">跳到此楼 ↗</span></div>
     ${documentData.content ? `<p class="result-snippet">${highlight(getSnippet(documentData.content, terms), terms)}</p>` : ""}
-    <div class="result-child-foot"><a href="${escapeHtml(threadUrl(documentData, terms))}" target="_blank" rel="noreferrer">跳到此楼 ↗</a></div>
-  </div>`;
+  </a>`;
 }
 
 function renderThreadGroup(group) {
@@ -1834,19 +1835,19 @@ function renderThreadGroup(group) {
   const replies = group.replies || [];
   const visible = replies.slice(0, 2);
   const extra = replies.slice(2);
-  const replySummary = group.directHit
-    ? (replies.length ? `，${replies.length} 条回帖命中` : "")
-    : `主题本身未命中，${replies.length} 条回帖命中`;
-  const matchSummary = matched ? `命中：${matched}${replySummary}` : replySummary;
+  const matchedParts = [matched, replies.length ? "回帖" : ""].filter(Boolean);
+  const matchSummary = matchedParts.length ? `命中：${matchedParts.join("、")}` : "";
   const childHtml = visible.map(renderMatchedReply).join("")
     + (extra.length ? `<details class="result-child-more"><summary>还有 ${extra.length} 条回帖命中</summary>${extra.map(renderMatchedReply).join("")}</details>` : "");
   return `<article class="result-card result-group">
-    <h3 class="result-title"><a href="${escapeHtml(threadUrl(documentData, parent.terms || []))}" target="_blank" rel="noreferrer">${highlight(documentData.title || "无标题", parent.terms || [])}</a></h3>
+    <a class="result-group-main" href="${escapeHtml(threadUrl(documentData, parent.terms || []))}" target="_blank" rel="noreferrer">
+    <h3 class="result-title">${highlight(documentData.title || "无标题", parent.terms || [])}</h3>
     <div class="result-meta"><span class="result-kind">帖子</span><span>${escapeHtml(documentData.boardDescription || documentData.board)}</span>${documentData.author ? `<span>${escapeHtml(documentData.author)}</span>` : ""}<span>${escapeHtml(formatTime(documentData.time))}</span><span>${escapeHtml(matchSummary)}</span>${documentData.nativeSearch ? '<span class="result-source">论坛快速匹配</span>' : ""}</div>
     ${state.searchMode === "online" && documentData.cachedAt ? `<p class="field-help">${documentData.cachePreview ? "缓存预览" : "缓存内容"} · ${escapeHtml(formatTime(documentData.cachedAt))} 获取</p>` : ""}
     ${documentData.content ? `<p class="result-snippet">${highlight(getSnippet(documentData.content, parent.terms || []), parent.terms || [])}</p>` : ""}
+    <span class="result-link-hint">打开原文 ↗</span>
+    </a>
     ${replies.length ? `<div class="result-children">${childHtml}</div>` : ""}
-    <div class="result-foot"><span>主题编号 ${escapeHtml(documentData.gid)}</span><a href="${escapeHtml(threadUrl(documentData, parent.terms || []))}" target="_blank" rel="noreferrer">打开原文 ↗</a></div>
   </article>`;
 }
 

@@ -211,8 +211,9 @@ test("综合结果遵守时间排序并显示实际命中字段", () => {
   api.renderResults();
   const html = context.document.querySelector("#result-list").innerHTML;
   assert.ok(html.indexOf("新主题") < html.indexOf("旧主题"));
-  assert.ok(html.includes("命中：正文"));
+  assert.ok(html.includes("命中：回帖"));
   assert.ok(html.includes("命中：标题、正文"));
+  assert.ok(html.includes('class="result-child" href='));
 });
 
 test("OR 分组保持组内同时匹配，合并命中且不把 OR 当作关键词", () => {

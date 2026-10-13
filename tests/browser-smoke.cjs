@@ -287,7 +287,7 @@ const scenario = String.raw`
   assert(state.onlineDocuments.filter(doc => doc.gid === '71' && doc.type === 'thread').length === 1, '快速候选和正文应合并成一条主题结果');
   const cards = [...document.querySelectorAll('.result-card')].filter(card => card.querySelector('.result-kind').textContent === '帖子');
   assert(cards[0].textContent.includes('主题71') && cards[1].textContent.includes('主题70'), '综合结果应按真实时间将新主题排在旧主题之前');
-  assert(document.querySelector('#result-list').textContent.includes('命中：正文'), '结果应显示自身命中字段');
+  assert(document.querySelector('#result-list').textContent.includes('命中：回帖'), '结果应显示回帖命中字段');
   document.querySelector('#index-board-all').checked = true;
   document.querySelector('#index-board-all').dispatchEvent(new Event('change'));
   await startOnlineSearch();
