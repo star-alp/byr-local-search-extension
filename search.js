@@ -1822,7 +1822,7 @@ function renderMatchedReply(result) {
   return `<div class="result-child">
     <div class="result-child-meta"><span class="result-kind">回帖</span><span>${escapeHtml(documentData.author || "已注销")}</span><span>第 ${escapeHtml(documentData.pos || 0)} 楼</span><span>${escapeHtml(formatTime(documentData.time))}</span>${matched ? `<span>命中：${matched}</span>` : ""}</div>
     ${documentData.content ? `<p class="result-snippet">${highlight(getSnippet(documentData.content, terms), terms)}</p>` : ""}
-    <div class="result-foot"><span>主题编号 ${escapeHtml(documentData.gid)}</span><a href="${escapeHtml(threadUrl(documentData, terms))}" target="_blank" rel="noreferrer">跳到此楼 ↗</a></div>
+    <div class="result-child-foot"><a href="${escapeHtml(threadUrl(documentData, terms))}" target="_blank" rel="noreferrer">跳到此楼 ↗</a></div>
   </div>`;
 }
 

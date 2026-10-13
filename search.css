@@ -214,16 +214,21 @@ h2 { margin: 0; font-size: 16px; }
 .result-list { display: grid; gap: 10px; }
 .result-card { border: 1px solid var(--line); border-radius: 5px; padding: 14px 15px; background: #fff; }
 .result-card:hover { border-color: #a9c7cb; background: #fbfdfd; }
-.result-group { padding-bottom: 11px; }
-.result-children { display: grid; gap: 7px; margin: 10px 0 0 12px; border-left: 2px solid #d9e8e9; padding-left: 12px; }
-.result-child { min-width: 0; border-radius: 4px; padding: 8px 9px; background: #f7fafa; }
-.result-child-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--muted); font-size: 11px; }
+.result-group { padding: 12px 14px 10px; }
+.result-group .result-title { font-size: 14px; }
+.result-group .result-meta { gap: 3px 10px; margin-top: 5px; font-size: 11px; }
+.result-group > .result-snippet { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; margin-top: 6px; font-size: 12px; line-height: 1.5; }
+.result-children { display: grid; gap: 3px; margin: 8px 0 0 7px; border-left: 2px solid #c8dfe1; padding-left: 10px; }
+.result-child { min-width: 0; padding: 4px 0 4px 3px; }
+.result-child:hover { background: #f7fafa; }
+.result-child-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 9px; color: var(--muted); font-size: 10px; line-height: 1.35; }
 .result-child-meta .result-kind { color: var(--accent); font-weight: 600; }
-.result-child .result-snippet { margin-top: 5px; font-size: 12px; line-height: 1.55; }
-.result-child .result-foot { margin-top: 5px; }
-.result-child-more { margin-top: 7px; color: var(--muted); font-size: 11px; }
+.result-child .result-snippet { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; margin: 2px 0 0; font-size: 11px; line-height: 1.45; }
+.result-child-foot { margin-top: 1px; font-size: 10px; line-height: 1.35; }
+.result-child-foot a { color: var(--accent); text-decoration: none; }
+.result-child-more { margin-top: 4px; color: var(--muted); font-size: 10px; }
 .result-child-more summary { width: fit-content; cursor: pointer; color: var(--accent); }
-.result-child-more .result-child { margin-top: 7px; }
+.result-child-more .result-child { margin-top: 3px; }
 .result-title { margin: 0; font-size: 15px; line-height: 1.45; }
 .result-title a { color: var(--ink); text-decoration: none; }
 .result-title a:hover { color: var(--accent); }
