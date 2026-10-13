@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "邮人全搜",
+  "version": "0.1.0",
+  "description": "北邮人论坛本地全文搜索助手（非官方）",
+  "permissions": [
+    "unlimitedStorage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://bbs.byr.cn/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "打开邮人全搜"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://bbs.byr.cn/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

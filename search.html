@@ -1,0 +1,227 @@
+<!--
+  邮人全搜扩展页面：本地索引、综合搜索和结果分类切换。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>邮人全搜</title>
+  <link rel="stylesheet" href="search.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>邮人全搜</h1>
+      <p class="subtitle">北邮人论坛搜索助手 <span>非官方</span></p>
+    </div>
+    <a class="forum-link" href="https://bbs.byr.cn/n/login" target="_blank" rel="noreferrer">打开论坛登录</a>
+  </header>
+
+  <main id="app-layout" class="layout">
+    <dialog id="search-settings" class="settings-dialog" hidden aria-labelledby="settings-title">
+      <div class="settings-heading">
+        <h2 id="settings-title">更多设置</h2>
+        <button id="close-settings" class="text-button" type="button" aria-label="关闭弹窗">关闭</button>
+      </div>
+      <div id="settings-dialog-content" class="settings-body">
+        <p class="settings-notice">打开此窗口时只能操作窗口内的功能，搜索会继续运行。</p>
+        <section class="panel-section panel-note">
+          <h2>本地索引与隐私</h2>
+          <div class="details-content">
+            <p>账号登录由论坛负责，插件不保存密码或 Cookie，不向第三方发送数据。在线搜索会向论坛提交关键词。自定义范围、搜索设置、任务进度及本次命中保存在当前浏览器；点击“保存结果”后命中内容才加入本地搜索索引。普通更新保留历史内容。已读取的内容页会在当前页面临时缓存 5 分钟，刷新或关闭页面即失效；再次搜索会刷新论坛搜索结果与主题列表，未过期正文可直接复用。</p>
+            <button id="clear-index" class="danger-button" type="button">清空本地索引</button>
+          </div>
+        </section>
+        <section class="panel-section resource-section">
+          <div class="resource-actions"><h2>插件资源</h2><button id="refresh-resources" class="text-button" type="button">刷新</button></div>
+          <p id="resource-summary" class="field-help">正在统计</p>
+          <dl class="resource-grid">
+            <div><dt>已索引内容</dt><dd id="resource-documents">--</dd></div>
+            <div><dt>版面数据</dt><dd id="resource-boards">--</dd></div>
+            <div><dt>索引数据估算</dt><dd id="resource-data-size">--</dd></div>
+            <div><dt>浏览器存储</dt><dd id="resource-storage">--</dd></div>
+            <div><dt>页面内存</dt><dd id="resource-memory">--</dd></div>
+            <div><dt>本轮请求</dt><dd id="resource-requests">0 次</dd></div>
+            <div><dt>会话缓存</dt><dd id="resource-session-cache">0 页 · 0 B</dd></div>
+          </dl>
+          <p class="field-help">存储和内存是浏览器提供的估算值；插件不会读取其他扩展或其他页面的资源。</p>
+        </section>
+      </div>
+    </dialog>
+
+    <aside id="settings-preferences-panel" class="control-panel" aria-label="搜索范围与设置">
+      <section id="settings-range-panel" class="panel-section scope-manager">
+        <div class="scope-editor">
+      <section class="panel-section index-section">
+        <details id="manual-board-details" class="sidebar-details manual-board-details" open>
+          <summary><span class="summary-title">搜索版面</span><span id="board-selection-status" class="summary-meta">正在加载</span></summary>
+          <div class="details-content">
+        <div class="index-source-row">
+          <button id="refresh-boards" class="button button-secondary" type="button">从论坛读取/刷新版面</button>
+          <span id="login-state" class="status-dot">检查中</span>
+        </div>
+        <div class="board-heading-row">
+          <div class="board-mode-switch" role="tablist" aria-label="版面操作视图">
+            <button id="board-mode-select" class="mode-tab is-active" type="button" role="tab" aria-selected="true">选择版面</button>
+            <button id="board-mode-review" class="mode-tab" type="button" role="tab" aria-selected="false">检查已选</button>
+          </div>
+          <label class="sr-only" for="board-search">查找版面</label>
+          <input id="board-search" class="input-control board-search" type="search" placeholder="查找版面名称或 ID" autocomplete="off">
+        </div>
+        <div id="board-search-results" class="board-search-results" hidden></div>
+        <div class="board-picker-stage">
+          <section id="board-select-view" class="board-picker-view is-active" role="tabpanel">
+            <div class="board-picker" aria-label="按分区勾选需要搜索的版面">
+              <section class="board-column"><h3>分区</h3><div id="board-section-list"></div></section>
+              <section class="board-column"><h3>目录</h3><div id="board-group-list"></div></section>
+              <section class="board-column"><h3>具体版面</h3><div id="board-leaf-list"></div></section>
+            </div>
+          </section>
+          <section id="board-review-view" class="board-picker-view" role="tabpanel" aria-hidden="true">
+            <label class="sr-only" for="board-filter">筛选版面</label>
+            <input id="board-filter" class="input-control board-filter" type="search" placeholder="在已选版面中筛选名称或 ID" autocomplete="off">
+            <div id="board-flat-list" class="board-flat-list"></div>
+          </section>
+        </div>
+        <select id="board-select" multiple hidden aria-hidden="true"></select>
+        <div class="board-actions-row">
+          <div class="inline-actions">
+            <button id="select-all-boards" class="text-button" type="button">全部版面</button>
+            <button id="clear-board-selection" class="text-button" type="button">清空选择</button>
+          </div>
+          <span id="board-mode-hint">按分区勾选需要搜索的版面</span>
+        </div>
+          </div>
+        </details>
+        <details id="index-range-details" class="sidebar-details">
+          <summary><span class="summary-title">读取范围</span><span id="index-range-summary" class="summary-meta">每版 3 页 · 每帖 3 页 · 不限时间</span></summary>
+          <div class="details-content">
+            <div class="index-range-grid">
+              <div class="range-field">
+                <label class="field-label" for="index-board-pages">每版主题页数</label>
+                <div class="number-option-row"><input id="index-board-pages" class="input-control" type="number" min="1" max="10000" value="3"><label class="check-label"><input id="index-board-all" type="checkbox">全部</label></div>
+              </div>
+              <div class="range-field">
+                <label class="field-label" for="index-thread-pages">每帖内容页数</label>
+                <div class="number-option-row"><input id="index-thread-pages" class="input-control" type="number" min="1" max="10000" value="3"><label class="check-label"><input id="index-thread-all" type="checkbox">全部</label></div>
+              </div>
+              <div class="range-field">
+                <label class="field-label" for="index-time-range">日期范围</label>
+                <select id="index-time-range" class="input-control">
+                  <option value="all">不限时间</option>
+                  <option value="30d">最近 30 天</option>
+                  <option value="custom">自定义日期</option>
+                </select>
+              </div>
+            </div>
+            <div id="index-custom-dates" class="custom-date-grid" hidden>
+              <label class="field-label" for="index-date-from">开始日期<input id="index-date-from" class="input-control" type="date"></label>
+              <label class="field-label" for="index-date-to">结束日期<input id="index-date-to" class="input-control" type="date"></label>
+            </div>
+            <p class="field-help">每版页数也限制原生搜索结果的翻页。查找旧主题中的新回帖时，需要同时扩大版面主题页数。</p>
+            <p class="field-help">页数用于在线搜索和更新索引；本地搜索按版面与日期筛选已保存内容。</p>
+          </div>
+        </details>
+      </section>
+        </div>
+        <details id="scope-presets-details" class="sidebar-details">
+          <summary><span class="summary-title">常用范围</span><span id="scope-presets-summary" class="summary-meta">按需保存常用组合</span></summary>
+          <div class="details-content">
+            <aside class="scope-library" aria-label="推荐与自定义搜索范围">
+              <div class="scope-library-heading"><strong>直接选用</strong><button id="new-scope-preset" class="text-button" type="button">＋ 保存新组合</button></div>
+              <div id="scope-preset-list" class="scope-preset-list"></div>
+            </aside>
+            <div class="scope-name-row">
+              <label class="sr-only" for="scope-preset-name">搜索范围名称</label>
+              <input id="scope-preset-name" class="input-control" type="text" maxlength="40" placeholder="给当前组合起个名称" autocomplete="off">
+              <button id="save-scope-preset" class="button button-secondary" type="button">保存范围</button>
+              <button id="delete-scope-preset" class="text-button danger-button" type="button" hidden>删除</button>
+            </div>
+            <p id="scope-preset-feedback" class="scope-feedback" role="status">将当前版面与读取范围保存，下次选用即可搜索。</p>
+          </div>
+        </details>
+      </section>
+        <details class="sidebar-details">
+          <summary><span class="summary-title">本地索引管理</span><span class="summary-meta">更新会保留历史内容</span></summary>
+          <div class="details-content">
+            <div class="index-actions">
+              <button id="start-index" class="button button-primary" type="button" disabled>开始更新索引</button>
+              <button id="pause-index" class="button button-secondary" type="button" disabled>暂停</button>
+            </div>
+            <div class="index-mode-row"><label class="check-label"><input id="index-incremental" type="checkbox" checked>增量更新</label><button id="full-index" class="text-button" type="button">完整重新检查</button></div>
+            <div class="progress-wrap" aria-live="polite">
+              <div class="progress-track"><div id="index-progress" class="progress-value"></div></div>
+              <div id="index-status" class="progress-status" aria-live="polite"><div class="progress-status-line"><strong id="index-status-summary">尚未建立索引 · 版面 0/0</strong><details><summary>查看详情</summary><p id="index-status-details">主题页 0 · 内容页 0 · 主题 0 · 请求 0 次</p></details></div></div>
+            </div>
+            <div class="inline-actions"><button id="retry-index" class="text-button" type="button" hidden>重试失败项</button><button id="new-index" class="text-button" type="button" hidden>重新更新</button></div>
+          </div>
+        </details>
+
+      <details class="sidebar-details performance-section">
+        <summary><span class="summary-title">请求性能</span><span id="performance-summary" class="summary-meta">并发 2 · 间隔 800 毫秒</span></summary>
+        <div class="details-content">
+          <div class="performance-grid">
+            <label class="field-label" for="request-concurrency">并发任务数<input id="request-concurrency" class="input-control" type="number" min="1" max="6" value="2"></label>
+            <label class="field-label" for="request-delay">请求间隔（毫秒）<input id="request-delay" class="input-control" type="number" min="200" max="5000" step="100" value="800"></label>
+          </div>
+          <div class="performance-live-row"><span id="performance-live-status">当前空闲</span><span>修改后对后续任务立即生效</span></div>
+          <p class="field-help">并发数用于在线搜索任务和索引版面；请求间隔是所有并发任务共享的全局限速。建议保持 1～2 个并发任务，避免触发论坛限流。</p>
+        </div>
+      </details>
+
+      <div class="panel-section settings-entry"><button id="open-settings" class="text-button" type="button" aria-haspopup="dialog" aria-controls="search-settings">更多设置</button></div>
+    </aside>
+
+    <section class="search-panel">
+      <div class="search-mode-row">
+        <div class="search-mode-switch" role="tablist" aria-label="搜索模式">
+          <button id="search-mode-online" class="search-mode-tab is-active" type="button" role="tab" aria-selected="true">在线搜索</button>
+          <button id="search-mode-local" class="search-mode-tab" type="button" role="tab" aria-selected="false">本地搜索</button>
+        </div>
+        <span id="search-mode-description">边读取边搜索，结果陆续显示</span>
+      </div>
+      <div class="search-box">
+        <label class="sr-only" for="query-input">搜索关键词</label>
+        <input id="query-input" class="query-input" type="search" placeholder="搜索帖子、回帖、用户名、版面" autocomplete="off">
+        <button id="search-button" class="button button-primary" type="button">搜索</button>
+      </div>
+      <div class="query-help-row"><span>空格：同时匹配 · OR：任一匹配，例如：关键词1 OR 关键词2</span><button id="fresh-online" class="text-button" type="button">重新获取最新数据</button></div>
+      <details id="search-history" class="search-history"><summary>最近搜索</summary><div id="search-history-list" class="search-history-list"><span class="field-help">暂无搜索记录</span></div></details>
+      <div id="online-search-status" class="online-search-status" aria-live="polite" hidden><div class="progress-status-line"><strong id="online-search-status-summary">尚未开始搜索 · 已找到 0 条</strong><details><summary>查看详情</summary><p id="online-search-status-details">版面 0/0 · 主题页 0 · 内容页 0 · 主题 0 · 请求 0 次</p></details></div></div>
+      <div id="online-search-tools" class="online-search-tools" hidden>
+        <button id="pause-online" class="button button-secondary" type="button" hidden>暂停</button>
+        <button id="continue-online" class="button button-primary" type="button" hidden>继续搜索</button>
+        <button id="retry-online" class="button button-secondary" type="button" hidden>重试失败项</button>
+        <button id="new-online" class="text-button" type="button" hidden>新搜索</button>
+        <button id="save-online-results" class="button button-secondary" type="button" hidden disabled>保存结果</button>
+      </div>
+      <details id="task-failures" class="task-failures" hidden><summary id="task-failures-summary">失败任务</summary><div id="task-failures-list"></div></details>
+      <nav class="result-tabs" aria-label="搜索结果类型">
+        <button class="result-tab is-active" data-type="all" type="button">综合</button>
+        <button class="result-tab" data-type="thread" type="button">帖子</button>
+        <button class="result-tab" data-type="reply" type="button">回帖</button>
+        <button class="result-tab" data-type="user" type="button">用户</button>
+        <button class="result-tab" data-type="board" type="button">版面</button>
+      </nav>
+      <div class="result-toolbar">
+        <span id="result-count">输入关键词开始搜索</span>
+        <select id="sort-select" class="sort-select" aria-label="结果排序">
+          <option value="relevance">按相关度</option>
+          <option value="recent">按时间</option>
+        </select>
+      </div>
+      <div id="result-list" class="result-list">
+        <div class="empty-state">
+          <strong>输入关键词开始搜索</strong>
+          <p>点击搜索后会扫描当前选择的版面范围。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="task-engine.js"></script>
+  <script src="search.js"></script>
+</body>
+</html>
