@@ -142,8 +142,10 @@ function installByrJumpHighlight() {
 
   const findTarget = (request) => {
     if (request.position) {
+      // nForum 旧版模板使用 <a name="a16"></a> 作为楼层锚点，不是 id 或 data-pos。
       const anchor = document.getElementById(`a${request.position}`)
-        || document.querySelector(`[data-pos="${CSS.escape(request.position)}"]`);
+        || document.querySelector(`[name="a${request.position}"]`)
+        || document.querySelector(`[data-pos="${request.position}"]`);
       if (anchor) return anchor.closest("article, .article, .article-item, .topic-reply, li, tr") || anchor.parentElement;
     }
     return document.querySelector("article, .article, .article-item, .topic-reply");
