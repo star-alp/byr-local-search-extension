@@ -70,7 +70,8 @@ const state = {
   requestCount: 0,
   restoredOnlineTaskId: "",
   settingsBackgroundTargets: [],
-  settingsGuardBound: false
+  settingsGuardBound: false,
+  settingsScrollState: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -1333,9 +1334,23 @@ function setSettingsOpen(open) {
           event.stopPropagation();
         };
         document.addEventListener("pointerdown", preventBackgroundInteraction, true);
+        document.addEventListener("pointerup", preventBackgroundInteraction, true);
+        document.addEventListener("mousedown", preventBackgroundInteraction, true);
         document.addEventListener("click", preventBackgroundInteraction, true);
+        document.addEventListener("contextmenu", preventBackgroundInteraction, true);
+        document.addEventListener("wheel", preventBackgroundInteraction, { capture: true, passive: false });
+        document.addEventListener("touchmove", preventBackgroundInteraction, { capture: true, passive: false });
+        document.addEventListener("focusin", preventBackgroundInteraction, true);
         document.addEventListener("keydown", preventBackgroundInteraction, true);
         state.settingsGuardBound = true;
+      }
+      if (!state.settingsScrollState) {
+        state.settingsScrollState = {
+          html: document.documentElement.style.overflow,
+          body: document.body.style.overflow
+        };
+        document.documentElement.style.overflow = "hidden";
+        document.body.style.overflow = "hidden";
       }
       return;
     }
@@ -1346,6 +1361,11 @@ function setSettingsOpen(open) {
       element.classList.remove("modal-background-blocked");
     });
     state.settingsBackgroundTargets = [];
+    if (state.settingsScrollState) {
+      document.documentElement.style.overflow = state.settingsScrollState.html;
+      document.body.style.overflow = state.settingsScrollState.body;
+      state.settingsScrollState = null;
+    }
   };
   if (open) {
     dialog.hidden = false;
@@ -1421,7 +1441,6 @@ function updateTaskStatus(task, active = 0) {
     state.indexActiveWorkers = active;
     $("#index-status-summary").textContent = compact;
     $("#index-status-details").textContent = text;
-    if (task.phase !== "complete") $("#index-status").querySelector("details").open = false;
     if (task.phase === "complete") $("#index-progress").style.width = "100%";
   }
   const failedJobs = Object.values(state.tasks).filter(Boolean).flatMap((item) =>

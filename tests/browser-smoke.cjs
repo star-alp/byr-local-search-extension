@@ -262,6 +262,12 @@ const scenario = String.raw`
   await startNewTask('index');
   assert(state.tasks.index.boards.length === 1 && state.tasks.index.options.boardPageLimit === 6, '侧栏修改应进入下一次任务，但不能覆盖已保存的预设');
   assert(state.scopePresets[0].options.boardPages === 1, '临时调整页数不能自动改写预设');
+  const indexDetails = document.querySelector('#index-status details');
+  indexDetails.open = false;
+  indexDetails.querySelector('summary').click();
+  assert(indexDetails.open, '索引查看详情应能展开');
+  updateTaskStatus(state.tasks.index, 0);
+  assert(indexDetails.open, '索引状态刷新不能强制折叠已展开的详情');
   selectScopePreset(state.scopePresets[0].id);
   saved = await getAll('documents');
   assert(saved.some(doc => doc.gid === '99'), '小范围索引更新不能清掉历史');
@@ -464,7 +470,7 @@ server.listen(0, "127.0.0.1", () => {
       const background = JSON.parse(await evaluate(`scrollTo(0,0);globalThis.smokeBackgroundClicks=0;document.getElementById('manual-board-details').open=false;document.querySelector('#manual-board-details > summary').addEventListener('click',()=>globalThis.smokeBackgroundClicks++);const target=document.querySelector('#manual-board-details > summary').getBoundingClientRect();document.getElementById('open-settings').click();JSON.stringify({x:target.left+15,y:target.top+target.height/2})`));
       await command('Input.dispatchMouseEvent', { type: 'mousePressed', ...background, button: 'left', clickCount: 1 });
       await command('Input.dispatchMouseEvent', { type: 'mouseReleased', ...background, button: 'left', clickCount: 1 });
-      if (!await evaluate(`smokeBackgroundClicks===0 && !document.getElementById('manual-board-details').open && document.getElementById('search-settings').matches(':modal') && document.getElementById('settings-preferences-panel').inert && document.querySelector('.search-panel').inert`)) throw new Error('模态弹窗未阻止鼠标点击主界面');
+      if (!await evaluate(`smokeBackgroundClicks===0 && !document.getElementById('manual-board-details').open && document.getElementById('search-settings').matches(':modal') && document.getElementById('settings-preferences-panel').inert && document.querySelector('.search-panel').inert && getComputedStyle(document.documentElement).overflow==='hidden' && getComputedStyle(document.body).overflow==='hidden'`)) throw new Error('模态弹窗未阻止鼠标点击主界面');
       if (!await evaluate(`document.getElementById('query-input').focus();document.activeElement!==document.getElementById('query-input')`)) throw new Error('主界面输入框能获取模态窗口外的键盘焦点');
       for (let count = 0; count < 8; count += 1) {
         await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
@@ -473,7 +479,7 @@ server.listen(0, "127.0.0.1", () => {
       }
       await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
       await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-      if (!await evaluate(`!document.getElementById('search-settings').open && document.getElementById('search-settings').hidden && !document.getElementById('settings-preferences-panel').inert && !document.querySelector('.search-panel').inert`)) throw new Error('Escape没有关闭弹窗或恢复主界面');
+      if (!await evaluate(`!document.getElementById('search-settings').open && document.getElementById('search-settings').hidden && !document.getElementById('settings-preferences-panel').inert && !document.querySelector('.search-panel').inert && getComputedStyle(document.documentElement).overflow!=='hidden' && getComputedStyle(document.body).overflow!=='hidden'`)) throw new Error('Escape没有关闭弹窗或恢复主界面');
       result.modalBlocksBackground = true;
       const checkLayout = async (expanded, width, modal = false) => {
         await command("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 600 });
