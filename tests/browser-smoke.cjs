@@ -280,6 +280,8 @@ const scenario = String.raw`
   assert(indexDetails.open, '索引查看详情应能展开');
   updateTaskStatus(state.tasks.index, 0);
   assert(indexDetails.open, '索引状态刷新不能强制折叠已展开的详情');
+  assert(document.querySelector('#index-status-summary').textContent.includes('已读取')
+    && document.querySelector('#index-status-summary').textContent.includes('已完成版面'), '索引主状态应同时显示已读取页数和完整完成版面');
   selectScopePreset(state.scopePresets[0].id);
   saved = await getAll('documents');
   assert(saved.some(doc => doc.gid === '99'), '小范围索引更新不能清掉历史');

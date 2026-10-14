@@ -1458,7 +1458,7 @@ function updateTaskStatus(task, active = 0) {
     + (task.error ? ` · ${task.error}` : "");
   const compact = task.mode === "online"
     ? `${phaseLabel} · 已找到 ${state.onlineDocuments.length} 条`
-    : `${labels[task.phase]} · 版面 ${metrics.boards}/${metrics.boardTotal}`;
+    : `${labels[task.phase]} · 已读取 ${metrics.boardPages + metrics.contentPages} 页 · 已完成版面 ${metrics.boards}/${metrics.boardTotal}`;
   if (task.mode === "online") {
     state.onlineActiveWorkers = active;
     $("#online-search-status-summary").textContent = compact;
