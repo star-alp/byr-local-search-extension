@@ -98,6 +98,18 @@ const scenario = String.raw`
   assert(state.searchMode === 'online', '默认应为在线');
   assert(document.querySelector('#search-settings').hidden, '首页设置应折叠');
   assert(document.querySelector('#index-incremental').closest('.sidebar-details').textContent.includes('增量更新（只读取变化主题）'), '增量更新选项应在本地索引管理中清楚标识');
+  const speed = document.querySelector('#request-speed');
+  assert(speed.value === 'high' && state.requestConcurrency === 6 && state.requestDelayMs === 100, '请求速度默认应使用高速配置');
+  speed.value = 'fast';
+  speed.dispatchEvent(new Event('change', { bubbles: true }));
+  assert(state.requestConcurrency === 4 && state.requestDelayMs === 200, '快速请求速度应同步设置同时请求数和启动间隔');
+  speed.value = 'custom';
+  speed.dispatchEvent(new Event('change', { bubbles: true }));
+  document.querySelector('#request-concurrency').value = '5';
+  document.querySelector('#request-concurrency').dispatchEvent(new Event('input', { bubbles: true }));
+  assert(speed.value === 'custom' && state.requestConcurrency === 5 && document.querySelector('#custom-performance').hidden === false, '自定义请求速度应显示并应用具体参数');
+  speed.value = 'high';
+  speed.dispatchEvent(new Event('change', { bubbles: true }));
   if (!resume) {
     assert(document.querySelector('#manual-board-details').open, '没有保存范围的新用户应默认展开手动选择');
     assert(!document.querySelector('#scope-presets-details').open, '常用范围应默认折叠，避免干扰手动选择');

@@ -172,7 +172,10 @@ h2 { margin: 0; font-size: 16px; }
 .resource-actions { color: var(--muted); font-size: 11px; }
 .performance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .performance-grid .field-label { margin: 0; }
+.performance-grid > .field-label:only-child { grid-column: 1 / -1; }
+.performance-grid select { margin-top: 4px; font-weight: 400; }
 .performance-grid input { margin-top: 4px; font-weight: 400; }
+.performance-custom { margin-top: 8px; }
 .performance-live-row { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; color: var(--muted); font-size: 11px; }
 .performance-live-row span:first-child { color: var(--accent); }
 .search-history { margin-top: 8px; color: var(--muted); font-size: 11px; }

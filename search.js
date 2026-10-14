@@ -5,8 +5,14 @@
 
 const DB_NAME = "byr-local-search";
 const DB_VERSION = 2;
-const DEFAULT_REQUEST_CONCURRENCY = 2;
-const DEFAULT_REQUEST_DELAY_MS = 800;
+const PERFORMANCE_PRESETS = Object.freeze({
+  stable: { label: "稳定", concurrency: 2, delayMs: 500 },
+  fast: { label: "快速", concurrency: 4, delayMs: 200 },
+  high: { label: "高速", concurrency: 6, delayMs: 100 }
+});
+const DEFAULT_REQUEST_PRESET = "high";
+const DEFAULT_REQUEST_CONCURRENCY = PERFORMANCE_PRESETS[DEFAULT_REQUEST_PRESET].concurrency;
+const DEFAULT_REQUEST_DELAY_MS = PERFORMANCE_PRESETS[DEFAULT_REQUEST_PRESET].delayMs;
 const PAGE_SIZE = 10;
 const SESSION_CACHE_TTL_MS = 5 * 60 * 1000;
 const SESSION_CACHE_MAX_BYTES = 8 * 1024 * 1024;
@@ -52,6 +58,7 @@ const state = {
   checkpointError: "",
   indexActiveWorkers: 0,
   onlineActiveWorkers: 0,
+  requestPreset: DEFAULT_REQUEST_PRESET,
   requestConcurrency: DEFAULT_REQUEST_CONCURRENCY,
   requestDelayMs: DEFAULT_REQUEST_DELAY_MS,
   lastRequestStartedAt: 0,
@@ -523,11 +530,16 @@ function updatePerformanceLiveStatus() {
 function updatePerformanceConfig(save = true) {
   const concurrency = Number($("#request-concurrency").value);
   const delay = Number($("#request-delay").value);
-  if (Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 6) state.requestConcurrency = concurrency;
-  if (Number.isInteger(delay) && delay >= 200 && delay <= 5000) state.requestDelayMs = delay;
-  $("#performance-summary").textContent = `并发 ${state.requestConcurrency} · 间隔 ${state.requestDelayMs} 毫秒`;
+  if (Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 8) state.requestConcurrency = concurrency;
+  if (Number.isInteger(delay) && delay >= 50 && delay <= 5000) state.requestDelayMs = delay;
+  const preset = PERFORMANCE_PRESETS[state.requestPreset];
+  $("#performance-summary").textContent = preset
+    ? `${preset.label} · 同时 ${state.requestConcurrency} 个 · 每 ${state.requestDelayMs} 毫秒启动`
+    : `自定义 · 同时 ${state.requestConcurrency} 个 · 每 ${state.requestDelayMs} 毫秒启动`;
+  $("#custom-performance").hidden = state.requestPreset !== "custom";
   if (save) {
     localStorage.setItem("byr-search-performance", JSON.stringify({
+      mode: state.requestPreset,
       concurrency: state.requestConcurrency,
       delayMs: state.requestDelayMs
     }));
@@ -539,11 +551,27 @@ function updatePerformanceConfig(save = true) {
 function loadPerformanceConfig() {
   try {
     const saved = JSON.parse(localStorage.getItem("byr-search-performance") || "{}");
-    if (Number.isInteger(saved.concurrency) && saved.concurrency >= 1 && saved.concurrency <= 6) state.requestConcurrency = saved.concurrency;
-    if (Number.isInteger(saved.delayMs) && saved.delayMs >= 200 && saved.delayMs <= 5000) state.requestDelayMs = saved.delayMs;
+    if (PERFORMANCE_PRESETS[saved.mode]) {
+      state.requestPreset = saved.mode;
+      state.requestConcurrency = PERFORMANCE_PRESETS[saved.mode].concurrency;
+      state.requestDelayMs = PERFORMANCE_PRESETS[saved.mode].delayMs;
+    } else if (Number.isInteger(saved.concurrency) && saved.concurrency >= 1 && saved.concurrency <= 8
+      && Number.isInteger(saved.delayMs) && saved.delayMs >= 50 && saved.delayMs <= 5000) {
+      // 旧版默认值过于保守；只迁移旧默认值，用户自定义值仍保留。
+      if (saved.concurrency === 2 && saved.delayMs === 800) {
+        state.requestPreset = DEFAULT_REQUEST_PRESET;
+        state.requestConcurrency = DEFAULT_REQUEST_CONCURRENCY;
+        state.requestDelayMs = DEFAULT_REQUEST_DELAY_MS;
+      } else {
+        state.requestPreset = "custom";
+        state.requestConcurrency = saved.concurrency;
+        state.requestDelayMs = saved.delayMs;
+      }
+    }
   } catch (_error) {
     // 配置损坏时使用安全的默认值。
   }
+  $("#request-speed").value = state.requestPreset;
   $("#request-concurrency").value = String(state.requestConcurrency);
   $("#request-delay").value = String(state.requestDelayMs);
   updatePerformanceConfig(false);
@@ -2156,8 +2184,23 @@ function bindEvents() {
   });
   $("#index-date-from").addEventListener("change", updateIndexRangeSummary);
   $("#index-date-to").addEventListener("change", updateIndexRangeSummary);
-  $("#request-concurrency").addEventListener("input", () => updatePerformanceConfig());
-  $("#request-delay").addEventListener("input", () => updatePerformanceConfig());
+  $("#request-speed").addEventListener("change", (event) => {
+    state.requestPreset = event.target.value;
+    if (state.requestPreset !== "custom") {
+      state.requestConcurrency = PERFORMANCE_PRESETS[state.requestPreset].concurrency;
+      state.requestDelayMs = PERFORMANCE_PRESETS[state.requestPreset].delayMs;
+      $("#request-concurrency").value = String(state.requestConcurrency);
+      $("#request-delay").value = String(state.requestDelayMs);
+    }
+    updatePerformanceConfig();
+  });
+  const markCustomPerformance = () => {
+    $("#request-speed").value = "custom";
+    state.requestPreset = "custom";
+    updatePerformanceConfig();
+  };
+  $("#request-concurrency").addEventListener("input", markCustomPerformance);
+  $("#request-delay").addEventListener("input", markCustomPerformance);
   $("#index-incremental").addEventListener("change", saveIndexOptions);
   $("#request-concurrency").addEventListener("blur", normalizePerformanceInput);
   $("#request-delay").addEventListener("blur", normalizePerformanceInput);
