@@ -55,19 +55,19 @@ const scenario = String.raw`
     const gid = pathname.match(/\/(\d+)\.json$/)?.[1];
     if (['70', '71', '72'].includes(gid)) return { ok: true, data: { success: true, data: {
       pagination: { total: 1 }, title: '陶小峰历史主题' + gid,
-      head: { poster: { id: 'teacher' }, content: '课程资料', time: gid === '70' ? 1791561600 : '2026-10-12' },
+      head: { id: 'history-head-' + gid, poster: { id: 'teacher' }, content: '课程资料', time: gid === '70' ? 1791561600 : '2026-10-12' },
       articles: [
-        { pos: 1, poster: { id: 'student' }, content: '陶小峰课程的回帖', time: '2026-10-12' },
-        { pos: 2, poster: { id: 'student' }, content: '谢谢分享', time: '2026-10-12' },
-        { pos: 3, poster: { id: 'studentWithName', user_name: '陶小峰' }, content: '补充资料', time: '2026-10-12' }
+        { id: 'history-reply-' + gid + '-1', pos: 1, poster: { id: 'student' }, content: '陶小峰课程的回帖', time: '2026-10-12' },
+        { id: 'history-reply-' + gid + '-2', pos: 2, poster: { id: 'student' }, content: '谢谢分享', time: '2026-10-12' },
+        { id: 'history-reply-' + gid + '-3', pos: 3, poster: { id: 'studentWithName', user_name: '陶小峰' }, content: '补充资料', time: '2026-10-12' }
       ]
     } } };
     if (gid === '8' && fail) { fail = false; return { ok: false, error: '模拟单帖网络错误' }; }
     if (shouldPause && gid === '7') { shouldPause = false; queueMicrotask(() => pauseTask('online')); }
     return { ok: true, data: { success: true, data: {
       pagination: { total: 2 }, title: 'txf 主题',
-      head: { poster: { id: 'txf' }, content: 'txf 完整正文 ' + gid + ' ' + cacheContent, time: 1791750000 },
-      articles: [{ pos: Number(url.searchParams.get('page')), poster: { id: 'txf' }, content: 'txf 回帖', time: 1791750000 }]
+      head: { id: 'head-' + gid, poster: { id: 'txf' }, content: 'txf 完整正文 ' + gid + ' ' + cacheContent, time: 1791750000 },
+      articles: [{ id: 'reply-' + gid + '-' + url.searchParams.get('page'), pos: Number(url.searchParams.get('page')), poster: { id: 'txf' }, content: 'txf 回帖', time: 1791750000 }]
     } } };
   } } };
 
@@ -284,6 +284,7 @@ const scenario = String.raw`
   assert(!state.onlineDocuments.some(doc => doc.type === 'reply' && doc.pos === 2), '标题命中不能导致无关回帖加入在线结果');
   assert(state.onlineDocuments.some(doc => doc.type === 'reply' && doc.pos === 1), '正文命中回帖应保留');
   assert(state.onlineDocuments.some(doc => doc.type === 'reply' && doc.pos === 3), '作者昵称命中回帖应保留');
+  assert(state.onlineDocuments.some(doc => doc.type === 'reply' && doc.url.includes('byr_article_id=history-reply-')), '正文结果链接应携带可校验的回帖编号');
   assert(state.onlineDocuments.filter(doc => doc.gid === '71' && doc.type === 'thread').length === 1, '快速候选和正文应合并成一条主题结果');
   const cards = [...document.querySelectorAll('.result-card')].filter(card => card.querySelector('.result-kind').textContent === '帖子');
   assert(cards[0].textContent.includes('主题71') && cards[1].textContent.includes('主题70'), '综合结果应按真实时间将新主题排在旧主题之前');
@@ -391,9 +392,10 @@ const server = http.createServer((req, res) => {
     res.end(`<!doctype html><meta charset="utf-8"><title>论坛跳转高亮测试</title>
       <div class="article" id="banner">资料：论坛横幅</div><div id="posts"></div>
       <script>globalThis.chrome={runtime:{onMessage:{addListener(){}},sendMessage(){}}};
+      globalThis.byrSearchJumpTimeoutMs=500;
       globalThis.renderPosts=()=>{document.getElementById('posts').innerHTML=
-      '<a name="a0"></a><div class="a-wrap" id="post0"><table class="article"><tr><td class="a-u-name">TeAcHer</td><td><div class="a-content-wrap">楼主资料 <b>资</b>料 <a id="original-link" href="#">资料链接</a> C++ <span hidden>资料</span><button>资料</button><textarea>资料</textarea></div></td></tr></table></div>'+
-      '<a name="a4"></a><div class="a-wrap" id="post4"><table class="article"><tr><td class="a-content-wrap">第4楼回帖资料</td></tr></table></div>';
+      '<a name="a0"></a><div class="a-wrap" id="post0"><table class="article"><tr><td class="a-u-name">TeAcHer</td><td><div class="a-content-wrap">楼主资料 <b>资</b>料 <a id="original-link" href="#">资料链接</a> C++ <span hidden>资料</span><button>资料</button><textarea>资料</textarea><a class="a-post" href="/article/StudyShare/post/700">回复</a></div></td></tr></table></div>'+
+      '<a name="a4"></a><div class="a-wrap" id="post4"><table class="article"><tr><td class="a-content-wrap">第4楼回帖资料 <a class="a-post" href="/article/StudyShare/post/704">回复</a></td></tr></table></div>';
       document.getElementById('original-link').addEventListener('click',event=>{event.preventDefault();globalThis.linkClicks=(globalThis.linkClicks||0)+1;});};</script>
       <script src="/content.js"></script><script>setTimeout(renderPosts,200);</script>`);
   } else {
@@ -490,7 +492,7 @@ server.listen(0, "127.0.0.1", () => {
       };
       result.layouts = [await checkLayout(false, 1280), await checkLayout(true, 1280), await checkLayout(false, 390), await checkLayout(true, 390), await checkLayout(false, 1280, true), await checkLayout(false, 390, true)];
       // 使用真实 DOM 重现横幅与帖子共用 article 类，以及单页路由延迟替换正文。
-      await command('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/jump#!article/StudyShare/7?byr_highlight=' + encodeURIComponent('资料|teacher|C++') });
+      await command('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/jump#!article/StudyShare/7?byr_article_id=700&byr_highlight=' + encodeURIComponent('资料|teacher|C++') });
       const waitForHighlight = async (id) => {
         for (let count = 0; count < 50; count += 1) {
           if (await evaluate(`document.querySelector('.byr-search-jump-highlight')?.id === '${id}'`)) return;
@@ -502,9 +504,9 @@ server.listen(0, "127.0.0.1", () => {
       if (await evaluate(`document.getElementById('banner').classList.contains('byr-search-jump-highlight')`)) throw new Error('主题跳转错误高亮了论坛横幅');
       if (!await evaluate(`(()=>{const matches=[...CSS.highlights.get('byr-search-terms')];return matches.length===5 && matches.filter(range=>range.toString()==='资料').length===3 && matches.some(range=>range.toString()==='TeAcHer') && matches.some(range=>range.toString()==='C++') && matches.every(range=>document.getElementById('post0').contains(range.commonAncestorContainer));})()`)) throw new Error('文字高亮应支持跨标签、大小写和正则特殊字符，且只匹配目标帖正文和作者');
       if (!await evaluate(`document.getElementById('original-link').click();linkClicks===1 && document.querySelector('#post0 b').textContent==='资' && !document.querySelector('#post0 mark')`)) throw new Error('文字高亮不能改变原有标签或破坏链接事件');
-      await evaluate(`location.hash='!article/StudyShare/7?p=1&byr_highlight=资料#a4'`);
+      await evaluate(`location.hash='!article/StudyShare/7?p=1&byr_article_id=704&byr_highlight=资料#a4'`);
       await waitForHighlight('post4');
-      if (!await evaluate(`document.querySelector('.byr-search-jump-badge').textContent==='搜索命中 · 第 4 楼'`)) throw new Error('回帖高亮楼层标记错误');
+      if (!await evaluate(`document.querySelector('.byr-search-jump-badge').textContent.includes('搜索命中 · 第 4 楼 · 1 处')`)) throw new Error('回帖高亮楼层标记错误');
       if (!await evaluate(`CSS.highlights.get('byr-search-terms').size===1 && [...CSS.highlights.get('byr-search-terms')][0].toString()==='资料'`)) throw new Error('跳到回帖时应移除楼主文字高亮，仅保留回帖命中');
       await evaluate(`document.querySelector('#post4 .a-content-wrap').firstChild.data='新增资料和资料'`);
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -518,7 +520,13 @@ server.listen(0, "127.0.0.1", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       if (await evaluate(`!!document.querySelector('.byr-search-jump-highlight,.byr-search-jump-badge')`)) throw new Error('离开搜索目标后应清除高亮');
       if (await evaluate(`CSS.highlights.has('byr-search-terms')`)) throw new Error('离开搜索目标后应清除文字高亮');
-      result.jumpHighlights = { thread: true, reply: true, delayedRender: true, bannerExcluded: true, textRanges: true, crossInlineTags: true, linksPreserved: true, textUpdates: true };
+      await evaluate(`location.hash='!article/StudyShare/9?byr_article_id=999&byr_highlight=资料'`);
+      await new Promise((resolve) => setTimeout(resolve, 650));
+      if (!await evaluate(`!!document.querySelector('.byr-search-jump-status') && document.querySelector('.byr-search-jump-status').textContent.includes('未找到目标')`)) throw new Error('找不到目标时应显示定位失败提示');
+      await evaluate(`document.getElementById('posts').insertAdjacentHTML('beforeend','<div class="a-wrap" id="post9"><div class="a-content-wrap">延迟资料 <a class="a-post" href="/article/StudyShare/post/999">回复</a></div></div>');document.querySelector('.byr-search-jump-status button').click()`);
+      await waitForHighlight('post9');
+      if (await evaluate(`!!document.querySelector('.byr-search-jump-status')`)) throw new Error('重新定位成功后应移除失败提示');
+      result.jumpHighlights = { thread: true, reply: true, exactArticleId: true, delayedRender: true, bannerExcluded: true, textRanges: true, crossInlineTags: true, linksPreserved: true, textUpdates: true, failureRetry: true };
       console.log(JSON.stringify(result));
       if (!result.ok) process.exitCode = 1;
     } catch (error) {

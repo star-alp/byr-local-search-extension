@@ -29,7 +29,7 @@ function page() {
     chrome: { runtime: { async sendMessage() { throw new Error("不应发出请求"); } } }
   });
   const source = fs.readFileSync(path.join(root, "search.js"), "utf8").replace(/init\(\)\.catch\([\s\S]*$/, "");
-  vm.runInContext(source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, queryGroups, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments };", context);
+  vm.runInContext(source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, queryGroups, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument };", context);
   return { context, api: context.api };
 }
 
@@ -128,6 +128,21 @@ test("正文保护兼容旧数据，快速候选不能覆盖完整正文，后�
   assert.equal(api.mergeDocument(full, quick).authorName, full.authorName);
   assert.equal(api.mergeDocument(full, quick).time, full.time);
   assert.equal(api.mergeDocument(full, { ...quick, content: "新正文", contentFetched: true, nativeSearch: false }).content, "新正文");
+});
+
+test("论坛 API 的真实字段也能生成带回帖编号的跳转链接", () => {
+  const { api } = page();
+  const doc = api.buildForumDocument("Talking", "谈天说地", { gid: "700", reply_count: 8 }, {
+    data: { title: "" }
+  }, {
+    id: "704", position: 4, user: { id: "student", user_name: "同学" },
+    content: "", post_time: "2026-10-12 12:00:00"
+  });
+  assert.equal(doc.pos, 4);
+  assert.equal(doc.author, "student");
+  assert.equal(doc.authorName, "同学");
+  assert.equal(doc.articleId, "704");
+  assert.ok(doc.url.includes("byr_article_id=704"));
 });
 
 test("暂停阻止已经在全局限速闸门中等待的请求发出", async () => {

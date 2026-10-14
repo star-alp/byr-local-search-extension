@@ -640,6 +640,7 @@ function threadUrl(doc, highlightTerms = []) {
   const base = `https://bbs.byr.cn/#!article/${encodeURIComponent(doc.board)}/${encodeURIComponent(doc.gid)}`;
   const params = new URLSearchParams();
   if (doc.type === "reply" && doc.pos) params.set("p", String(Math.max(1, Math.floor(Number(doc.pos) / PAGE_SIZE) + 1)));
+  if (doc.articleId) params.set("byr_article_id", String(doc.articleId));
   const terms = [...new Set((Array.isArray(highlightTerms) ? highlightTerms : []).map((term) => String(term || "").trim()).filter(Boolean))].slice(0, 8);
   if (terms.length) params.set("byr_highlight", terms.join("|"));
   const query = params.toString();
@@ -1081,7 +1082,8 @@ function updateIndexRangeSummary() {
 
 
 function boardPosts(data) {
-  const posts = [...(data?.posts || []), ...(data?.topPosts || [])];
+  const posts = [...(data?.posts || []), ...(data?.topPosts || []), ...(data?.article || [])]
+    .map((post) => ({ ...post, gid: String(post?.gid ?? post?.group_id ?? post?.id ?? "") }));
   const seen = new Set();
   return posts.filter((post) => {
     const id = String(post?.gid || "");
@@ -1138,9 +1140,13 @@ function inIndexTimeRange(value, range) {
 }
 
 function buildForumDocument(board, boardDescription, post, result, article) {
-  const pos = Number(article.pos) || 0;
-  const author = article.poster?.id || article.poster || post.poster?.id || post.poster || "已注销";
-  const gid = String(post.gid);
+  const pos = Number(article.pos ?? article.position) || 0;
+  const articleUser = article.poster || article.user;
+  const postUser = post.poster || post.user;
+  const author = articleUser?.id || articleUser || postUser?.id || postUser || "已注销";
+  const authorName = articleUser?.user_name || articleUser?.username || "";
+  const articleId = String(article.id ?? article.ID ?? article.article_id ?? "").trim();
+  const gid = String(post.gid ?? post.group_id ?? post.id);
   return {
     id: pos === 0 ? `thread:${board}:${gid}` : `reply:${board}:${gid}:${pos}`,
     type: pos === 0 ? "thread" : "reply",
@@ -1151,11 +1157,12 @@ function buildForumDocument(board, boardDescription, post, result, article) {
     content: htmlToText(article.content),
     contentFetched: true,
     author,
-    authorName: article.poster?.user_name || "",
+    authorName,
+    articleId,
     pos,
-    time: article.time || (pos === 0 ? post.postTime || post.time : null),
+    time: article.time ?? article.post_time ?? (pos === 0 ? post.postTime ?? post.post_time ?? post.time : null),
     replyCount: post.replyCount,
-    url: threadUrl({ type: pos === 0 ? "thread" : "reply", board, gid, pos })
+    url: threadUrl({ type: pos === 0 ? "thread" : "reply", board, gid, pos, articleId })
   };
 }
 
@@ -1232,7 +1239,10 @@ function mergeOnlineDocuments(documents, groups) {
 }
 
 function readArticleDocuments(board, post, result, range) {
-  const articles = [...(result.data?.head ? [{ ...result.data.head, pos: 0 }] : []), ...(result.data?.articles || [])];
+  const articles = [
+    ...(result.data?.head ? [{ ...result.data.head, pos: 0 }] : []),
+    ...(result.data?.articles || result.data?.article || [])
+  ];
   const documents = new Map();
   articles.forEach((article) => {
     const doc = buildForumDocument(board.name, board.description, post, result, article);

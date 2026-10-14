@@ -84,6 +84,7 @@ function installByrJumpHighlight() {
   let timer = null;
   let highlighted = null;
   let previousPosition = "";
+  let statusElement = null;
 
   const ensureStyle = () => {
     if (document.getElementById("byr-search-jump-style")) return;
@@ -113,6 +114,31 @@ function installByrJumpHighlight() {
         color: #3b2500;
         font: 700 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
+      .byr-search-jump-badge button,
+      .byr-search-jump-status button {
+        margin-left: 7px;
+        border: 1px solid rgba(59, 37, 0, .45);
+        border-radius: 3px;
+        padding: 2px 5px;
+        background: rgba(255, 255, 255, .6);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .byr-search-jump-status {
+        position: fixed;
+        right: 24px;
+        bottom: 72px;
+        z-index: 2147483645;
+        max-width: min(360px, calc(100vw - 48px));
+        border: 2px solid #d97706;
+        border-radius: 6px;
+        padding: 9px 11px;
+        background: #fff7d6;
+        color: #7a2200;
+        box-shadow: 0 5px 16px rgba(23, 48, 56, .25);
+        font: 600 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
       ::highlight(byr-search-terms) {
         background-color: #ffe066;
         color: #7a2200;
@@ -133,7 +159,30 @@ function installByrJumpHighlight() {
     const params = new URLSearchParams(queryIndex >= 0 ? pathAndQuery.slice(queryIndex + 1) : "");
     const position = anchor?.match(/^a(\d+)$/u)?.[1] || "";
     const terms = (params.get("byr_highlight") || "").split("|").filter(Boolean).slice(0, 8);
-    return { position, terms };
+    const articleId = (params.get("byr_article_id") || "").trim();
+    return { position, articleId, terms };
+  };
+
+  const removeStatus = () => {
+    statusElement?.remove();
+    statusElement = null;
+  };
+
+  const showStatus = (request) => {
+    removeStatus();
+    statusElement = document.createElement("div");
+    statusElement.className = "byr-search-jump-status";
+    statusElement.append(`未找到目标${request.position ? `（第 ${request.position} 楼）` : "帖子"}，可能还在加载。`);
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.textContent = "重新定位";
+    retry.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      run();
+    });
+    statusElement.append(retry);
+    document.body.appendChild(statusElement);
   };
 
   const clearHighlight = () => {
@@ -149,7 +198,7 @@ function installByrJumpHighlight() {
   };
 
   const highlightText = (request, target) => {
-    if (!window.CSS?.highlights || !window.Highlight) return null;
+    if (!window.CSS?.highlights || !window.Highlight) return { firstRange: null, count: 0 };
     const terms = [...new Set(request.terms)].sort((a, b) => b.length - a.length)
       .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
     const ranges = [];
@@ -173,10 +222,12 @@ function installByrJumpHighlight() {
         let index = 0;
         for (const match of text.matchAll(pattern)) {
           const end = match.index + match[0].length;
-          while (nodes[index].end <= match.index) index += 1;
+          while (nodes[index] && nodes[index].end <= match.index) index += 1;
           const startNode = nodes[index];
-          while (nodes[index].end < end) index += 1;
+          if (!startNode) continue;
+          while (nodes[index] && nodes[index].end < end) index += 1;
           const endNode = nodes[index];
+          if (!endNode) continue;
           const range = document.createRange();
           range.setStart(startNode.node, match.index - startNode.start);
           range.setEnd(endNode.node, end - endNode.start);
@@ -185,10 +236,24 @@ function installByrJumpHighlight() {
       });
     }
     window.CSS.highlights.set("byr-search-terms", new Highlight(...ranges));
-    return ranges[0] || null;
+    return { firstRange: ranges[0] || null, count: ranges.length };
   };
 
   const findTarget = (request) => {
+    const posts = [...document.querySelectorAll(".a-wrap, article, .article-item, .topic-reply")];
+    if (request.articleId) {
+      const exact = posts.find((post) => [...post.querySelectorAll("a[href]")].some((link) => {
+        const match = String(link.getAttribute("href") || "").match(/\/post\/([^/?#]+)/u);
+        if (!match) return false;
+        try {
+          return decodeURIComponent(match[1]) === request.articleId;
+        } catch (_error) {
+          return match[1] === request.articleId;
+        }
+      }));
+      // 传入回帖编号时只接受编号匹配，避免楼层变化后高亮另一条回帖。
+      return exact || null;
+    }
     // 主题链接定位楼主 a0；页面横幅也有 article 类名，不能用它寻找第一篇帖子。
     const position = request.position || "0";
     // nForum 旧版模板使用 <a name="a16"></a> 作为楼层锚点，不是 id 或 data-pos。
@@ -215,9 +280,22 @@ function installByrJumpHighlight() {
     target.classList.add("byr-search-jump-highlight");
     const badge = document.createElement("span");
     badge.className = "byr-search-jump-badge";
-    badge.textContent = request.position ? `搜索命中 · 第 ${request.position} 楼` : "搜索命中";
     target.appendChild(badge);
-    const firstMatch = highlightText(request, target);
+    const matchResult = highlightText(request, target);
+    const firstMatch = matchResult?.firstRange || null;
+    const matchCount = matchResult?.count || 0;
+    const summary = request.position ? `第 ${request.position} 楼` : "主题帖";
+    const label = request.terms.length
+      ? (matchCount ? `搜索命中 · ${summary} · ${matchCount} 处` : `已定位 · ${summary} · 本页未找到关键词`)
+      : `已定位 · ${summary}`;
+    badge.textContent = label;
+    if (request.terms.length && !matchCount) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = "重新定位";
+      retry.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); run(); });
+      badge.append(retry);
+    }
     const rect = firstMatch?.getBoundingClientRect();
     if (rect?.height) {
       window.scrollBy({ top: rect.top - Math.max(96, window.innerHeight * 0.35), behavior: "smooth" });
@@ -229,7 +307,8 @@ function installByrJumpHighlight() {
     window.clearTimeout(timer);
     clearHighlight();
     const request = requestFromHash();
-    if (!request || (!request.position && !request.terms.length)) return;
+    removeStatus();
+    if (!request || (!request.position && !request.articleId && !request.terms.length)) return;
     const attempt = () => {
       const target = findTarget(request);
       if (!target) return false;
@@ -244,7 +323,11 @@ function installByrJumpHighlight() {
     attempt();
     observer = new MutationObserver(attempt);
     observer.observe(document.body, { childList: true, characterData: true, subtree: true });
-    timer = window.setTimeout(() => observer?.disconnect(), 15000);
+    const timeoutMs = Number(globalThis.byrSearchJumpTimeoutMs) || 15000;
+    timer = window.setTimeout(() => {
+      observer?.disconnect();
+      if (!highlighted?.isConnected) showStatus(request);
+    }, timeoutMs);
   };
 
   window.addEventListener("hashchange", run);
