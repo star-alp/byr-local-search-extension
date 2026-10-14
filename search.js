@@ -67,7 +67,8 @@ const state = {
   boardSearchActiveIndex: -1,
   searchHistory: [],
   indexMetadata: {},
-  requestCount: 0
+  requestCount: 0,
+  restoredOnlineTaskId: ""
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -143,20 +144,38 @@ function indexedPostKey(board, post) {
   return `${board.name}:${String(post.gid)}`;
 }
 
+function postReplyCount(post) {
+  return post.replyCount ?? post.reply_count ?? post.replyNum ?? post.articleNum ?? null;
+}
+
+function postUpdatedTime(post) {
+  return post.postTime || post.post_time || post.lastReplyTime || post.last_reply_time || post.time || null;
+}
+
+function indexTimeRangeKey(range, mode = "") {
+  if (!range) return "all";
+  if (mode === "30d") return "30d";
+  return `${mode || "custom"}:${range.start}:${range.end}`;
+}
+
 function shouldReadIndexedPost(task, board, post) {
   if (task.mode !== "index" || task.options.incremental === false) return true;
   const metadata = state.indexMetadata[indexedPostKey(board, post)];
   if (!metadata || !state.documents.some((doc) => doc.board === board.name && String(doc.gid) === String(post.gid))) return true;
-  return String(metadata.replyCount ?? "") !== String(post.replyCount ?? "")
-    || String(metadata.postTime ?? "") !== String(post.postTime || post.time || "")
-    || metadata.threadPageLimit !== task.options.threadPageLimit;
+  return String(metadata.replyCount ?? "") !== String(postReplyCount(post) ?? "")
+    || String(metadata.postTime ?? "") !== String(postUpdatedTime(post) ?? "")
+    || String(metadata.title ?? "") !== String(post.title ?? "")
+    || metadata.threadPageLimit !== task.options.threadPageLimit
+    || metadata.timeRangeKey !== indexTimeRangeKey(task.options.timeRange, task.options.timeRangeMode);
 }
 
 function rememberIndexedPost(task, board, post) {
   state.indexMetadata[indexedPostKey(board, post)] = {
-    replyCount: post.replyCount ?? null,
-    postTime: post.postTime || post.time || null,
+    replyCount: postReplyCount(post),
+    postTime: postUpdatedTime(post),
+    title: post.title || "",
     threadPageLimit: task.options.threadPageLimit,
+    timeRangeKey: indexTimeRangeKey(task.options.timeRange, task.options.timeRangeMode),
     checkedAt: Date.now()
   };
   saveIndexMetadata();
@@ -1129,7 +1148,8 @@ function readIndexOptions(values = indexOptionValues()) {
   return {
     boardPageLimit: readPages(values.boardPages, values.boardAll),
     threadPageLimit: readPages(values.threadPages, values.threadAll),
-    timeRange: readIndexTimeRange(values)
+    timeRange: readIndexTimeRange(values),
+    timeRangeMode: values.timeRange
   };
 }
 
@@ -1160,8 +1180,8 @@ function buildForumDocument(board, boardDescription, post, result, article) {
     authorName,
     articleId,
     pos,
-    time: article.time ?? article.post_time ?? (pos === 0 ? post.postTime ?? post.post_time ?? post.time : null),
-    replyCount: post.replyCount,
+    time: article.time ?? article.post_time ?? (pos === 0 ? postUpdatedTime(post) : null),
+    replyCount: postReplyCount(post),
     url: threadUrl({ type: pos === 0 ? "thread" : "reply", board, gid, pos, articleId })
   };
 }
@@ -1332,14 +1352,18 @@ function updateOnlineSearchControls() {
 function updateTaskStatus(task, active = 0) {
   const metrics = ByrTasks.metrics(task);
   const labels = { running: task.pauseRequested ? "正在暂停" : "正在读取与搜索", paused: "已暂停，可继续", partial: "部分完成", complete: "所选范围扫描完成" };
-  const text = `${labels[task.phase]} · 版面 ${metrics.boards}/${metrics.boardTotal} · 已读取 ${metrics.boardPages} 个主题页、${metrics.contentPages} 个内容页 · 涉及 ${metrics.threads} 个主题 · 请求 ${task.requests} 次`
+  const phaseLabel = task.mode === "online" && state.restoredOnlineTaskId === task.id && !state.onlineSearchRunning
+    ? "已恢复上次搜索"
+    : labels[task.phase];
+  const text = `${phaseLabel} · 版面 ${metrics.boards}/${metrics.boardTotal} · 已读取 ${metrics.boardPages} 个主题页、${metrics.contentPages} 个内容页 · 涉及 ${metrics.threads} 个主题 · 请求 ${task.requests} 次`
     + (task.mode === "online" ? ` · 原生搜索 ${metrics.nativePages} 页` : "")
     + (task.mode === "online" ? ` · 命中 ${state.onlineDocuments.length} 条` : "")
+    + (task.mode === "index" && task.incrementalSkipped ? ` · 跳过 ${task.incrementalSkipped} 个未变化主题` : "")
     + (task.cachePages ? ` · 复用 ${task.cachePages} 个内容页（${formatTime(task.cacheOldestAt)} 获取）` : "")
     + (metrics.failures.length ? ` · 失败 ${metrics.failures.length} 项` : "")
     + (task.error ? ` · ${task.error}` : "");
   const compact = task.mode === "online"
-    ? `${labels[task.phase]} · 已找到 ${state.onlineDocuments.length} 条`
+    ? `${phaseLabel} · 已找到 ${state.onlineDocuments.length} 条`
     : `${labels[task.phase]} · 版面 ${metrics.boards}/${metrics.boardTotal}`;
   if (task.mode === "online") {
     state.onlineActiveWorkers = active;
@@ -1479,6 +1503,7 @@ async function restoreTasks() {
       state.onlineDocumentMap = new Map(state.onlineDocuments.map((doc) => [doc.id, doc]));
       state.onlineQuery = task.query;
       $("#query-input").value = task.query;
+      state.restoredOnlineTaskId = task.id || "";
       restoredOnlineResults = true;
     }
     delete task.results;
@@ -1530,6 +1555,7 @@ async function executeTaskJob(task, job) {
   if (job.kind === "board") {
     boardPosts(result.data).forEach((item) => {
       if (shouldReadIndexedPost(task, board, item)) enqueuePage(task, "article", board, 1, item);
+      else task.incrementalSkipped = (task.incrementalSkipped || 0) + 1;
     });
     return;
   }
@@ -1557,6 +1583,7 @@ async function executeTaskJob(task, job) {
 
 async function runTask(task) {
   if (state.indexRunning || state.onlineSearchRunning) return;
+  if (task.mode === "online" && state.restoredOnlineTaskId === task.id) state.restoredOnlineTaskId = "";
   if (task.mode === "online") {
     state.onlineSearchRunning = true;
     $("#query-input").value = task.query;
@@ -1605,6 +1632,7 @@ async function startNewTask(mode, fresh = false, overrides = {}) {
     if (!names.length) { $("#manual-board-details").open = true; $("#settings-range-panel").scrollIntoView({ block: "nearest" }); throw new Error("请选择至少一个版面"); }
     const boards = state.boards.filter((board) => names.includes(board.name));
     const task = ByrTasks.create(mode, boards, { ...readIndexOptions(), ...overrides }, query);
+    if (mode === "index") task.incrementalSkipped = 0;
     if (fresh) { state.sessionPages.clear(); state.sessionCacheBytes = 0; }
     boards.forEach((board) => {
       if (mode === "online") nativeSearchPaths(board.name, query, task.options).forEach((path) => {

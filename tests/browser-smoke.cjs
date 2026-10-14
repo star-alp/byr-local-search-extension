@@ -217,6 +217,7 @@ const scenario = String.raw`
   assert(state.activeScopeId === state.scopePresets[0].id && readIndexOptions().boardPageLimit === 1, '重新打开后应恢复上次应用的范围');
   assert(state.tasks.online.phase === 'paused', '应能恢复暂停任务');
   assert(state.onlineDocuments.length > 0, '恢复应保留命中');
+  assert(document.querySelector('#online-search-status-summary').textContent.includes('已恢复上次搜索'), '刷新后应明确提示已恢复上次搜索');
   assert(document.querySelector('#result-list').textContent.includes('主题'), '恢复任务后结果列表应同步显示已保存的命中');
   selectScopePreset(state.scopePresets[1].id);
   assert(state.tasks.online.boards.length === 1 && state.tasks.online.options.boardPageLimit === 1, '切换范围不能改变已经暂停的任务');
@@ -264,6 +265,11 @@ const scenario = String.raw`
   saved = await getAll('documents');
   assert(saved.some(doc => doc.gid === '99'), '小范围索引更新不能清掉历史');
   assert(state.tasks.index.phase === 'complete', '索引应完成');
+  const indexArticleRequests = () => Object.entries(counts).filter(([key]) => key.startsWith('/n/b/article/')).reduce((sum, [, value]) => sum + value, 0);
+  const indexRequestsBeforeRepeat = indexArticleRequests();
+  await startNewTask('index');
+  assert(state.tasks.index.phase === 'complete' && state.tasks.index.incrementalSkipped > 0, '再次更新时应跳过未变化主题并完成');
+  assert(indexRequestsBeforeRepeat === indexArticleRequests(), '增量更新不应重复读取未变化主题正文');
   const titleOnlyReply = { id: 'reply:Talking:500:1', type: 'reply', board: 'Talking', gid: '500', title: '陶小峰课程', content: '谢谢分享', author: 'student', pos: 1, time: '2026-10-12' };
   await saveDocuments([titleOnlyReply]);
   state.documents = await getAll('documents');
