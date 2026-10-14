@@ -97,6 +97,7 @@ const scenario = String.raw`
   assert(state.sessionPages.size === 0 && state.sessionCacheBytes === 0, '页面重新打开不能从持久存储恢复正文会话缓存');
   assert(state.searchMode === 'online', '默认应为在线');
   assert(document.querySelector('#search-settings').hidden, '首页设置应折叠');
+  assert(document.querySelector('#index-incremental').closest('.sidebar-details').textContent.includes('增量更新（只读取变化主题）'), '增量更新选项应在本地索引管理中清楚标识');
   if (!resume) {
     assert(document.querySelector('#manual-board-details').open, '没有保存范围的新用户应默认展开手动选择');
     assert(!document.querySelector('#scope-presets-details').open, '常用范围应默认折叠，避免干扰手动选择');
@@ -463,7 +464,7 @@ server.listen(0, "127.0.0.1", () => {
       const background = JSON.parse(await evaluate(`scrollTo(0,0);globalThis.smokeBackgroundClicks=0;document.getElementById('manual-board-details').open=false;document.querySelector('#manual-board-details > summary').addEventListener('click',()=>globalThis.smokeBackgroundClicks++);const target=document.querySelector('#manual-board-details > summary').getBoundingClientRect();document.getElementById('open-settings').click();JSON.stringify({x:target.left+15,y:target.top+target.height/2})`));
       await command('Input.dispatchMouseEvent', { type: 'mousePressed', ...background, button: 'left', clickCount: 1 });
       await command('Input.dispatchMouseEvent', { type: 'mouseReleased', ...background, button: 'left', clickCount: 1 });
-      if (!await evaluate(`smokeBackgroundClicks===0 && !document.getElementById('manual-board-details').open && document.getElementById('search-settings').matches(':modal')`)) throw new Error('模态弹窗未阻止鼠标点击主界面');
+      if (!await evaluate(`smokeBackgroundClicks===0 && !document.getElementById('manual-board-details').open && document.getElementById('search-settings').matches(':modal') && document.getElementById('settings-preferences-panel').inert && document.querySelector('.search-panel').inert`)) throw new Error('模态弹窗未阻止鼠标点击主界面');
       if (!await evaluate(`document.getElementById('query-input').focus();document.activeElement!==document.getElementById('query-input')`)) throw new Error('主界面输入框能获取模态窗口外的键盘焦点');
       for (let count = 0; count < 8; count += 1) {
         await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
@@ -472,7 +473,7 @@ server.listen(0, "127.0.0.1", () => {
       }
       await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
       await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-      if (!await evaluate(`!document.getElementById('search-settings').open && document.getElementById('search-settings').hidden`)) throw new Error('Escape没有关闭弹窗');
+      if (!await evaluate(`!document.getElementById('search-settings').open && document.getElementById('search-settings').hidden && !document.getElementById('settings-preferences-panel').inert && !document.querySelector('.search-panel').inert`)) throw new Error('Escape没有关闭弹窗或恢复主界面');
       result.modalBlocksBackground = true;
       const checkLayout = async (expanded, width, modal = false) => {
         await command("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 600 });

@@ -68,7 +68,9 @@ const state = {
   searchHistory: [],
   indexMetadata: {},
   requestCount: 0,
-  restoredOnlineTaskId: ""
+  restoredOnlineTaskId: "",
+  settingsBackgroundTargets: [],
+  settingsGuardBound: false
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -1307,9 +1309,53 @@ function setOnlineSearchStatus(message, running = state.onlineSearchRunning) {
 
 function setSettingsOpen(open) {
   const dialog = $("#search-settings");
-  dialog.hidden = !open;
-  if (open && !dialog.open) dialog.showModal();
-  else if (!open) dialog.close();
+  const layout = $("#app-layout");
+  const setBackgroundBlocked = (blocked) => {
+    if (blocked) {
+      if (!state.settingsBackgroundTargets.length) {
+        const targets = [document.querySelector(".app-header"), ...[...layout.children].filter((item) => item !== dialog)].filter(Boolean);
+        state.settingsBackgroundTargets = targets.map((element) => ({
+          element,
+          inert: Boolean(element.inert),
+          ariaHidden: element.getAttribute("aria-hidden")
+        }));
+        state.settingsBackgroundTargets.forEach(({ element }) => {
+          element.inert = true;
+          element.setAttribute("aria-hidden", "true");
+          element.classList.add("modal-background-blocked");
+        });
+      }
+      if (!state.settingsGuardBound) {
+        const preventBackgroundInteraction = (event) => {
+          if (!dialog.open || dialog.contains(event.target)) return;
+          if (event.type === "keydown" && event.key === "Escape") return;
+          event.preventDefault();
+          event.stopPropagation();
+        };
+        document.addEventListener("pointerdown", preventBackgroundInteraction, true);
+        document.addEventListener("click", preventBackgroundInteraction, true);
+        document.addEventListener("keydown", preventBackgroundInteraction, true);
+        state.settingsGuardBound = true;
+      }
+      return;
+    }
+    state.settingsBackgroundTargets.forEach(({ element, inert, ariaHidden }) => {
+      element.inert = inert;
+      if (ariaHidden === null) element.removeAttribute("aria-hidden");
+      else element.setAttribute("aria-hidden", ariaHidden);
+      element.classList.remove("modal-background-blocked");
+    });
+    state.settingsBackgroundTargets = [];
+  };
+  if (open) {
+    dialog.hidden = false;
+    if (!dialog.open) dialog.showModal();
+    setBackgroundBlocked(true);
+  } else {
+    if (dialog.open) dialog.close();
+    dialog.hidden = true;
+    setBackgroundBlocked(false);
+  }
 }
 
 function updateOnlineSearchControls() {
