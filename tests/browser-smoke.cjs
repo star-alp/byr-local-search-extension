@@ -389,11 +389,12 @@ const server = http.createServer((req, res) => {
   } else if (req.url === "/jump") {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.end(`<!doctype html><meta charset="utf-8"><title>论坛跳转高亮测试</title>
-      <div class="article" id="banner">论坛横幅</div><div id="posts"></div>
+      <div class="article" id="banner">资料：论坛横幅</div><div id="posts"></div>
       <script>globalThis.chrome={runtime:{onMessage:{addListener(){}},sendMessage(){}}};
       globalThis.renderPosts=()=>{document.getElementById('posts').innerHTML=
-      '<a name="a0"></a><div class="a-wrap" id="post0"><table class="article"><tr><td>楼主正文</td></tr></table></div>'+
-      '<a name="a4"></a><div class="a-wrap" id="post4"><table class="article"><tr><td>第4楼回帖</td></tr></table></div>';};</script>
+      '<a name="a0"></a><div class="a-wrap" id="post0"><table class="article"><tr><td class="a-u-name">TeAcHer</td><td><div class="a-content-wrap">楼主资料 <b>资</b>料 <a id="original-link" href="#">资料链接</a> C++ <span hidden>资料</span><button>资料</button><textarea>资料</textarea></div></td></tr></table></div>'+
+      '<a name="a4"></a><div class="a-wrap" id="post4"><table class="article"><tr><td class="a-content-wrap">第4楼回帖资料</td></tr></table></div>';
+      document.getElementById('original-link').addEventListener('click',event=>{event.preventDefault();globalThis.linkClicks=(globalThis.linkClicks||0)+1;});};</script>
       <script src="/content.js"></script><script>setTimeout(renderPosts,200);</script>`);
   } else {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -489,7 +490,7 @@ server.listen(0, "127.0.0.1", () => {
       };
       result.layouts = [await checkLayout(false, 1280), await checkLayout(true, 1280), await checkLayout(false, 390), await checkLayout(true, 390), await checkLayout(false, 1280, true), await checkLayout(false, 390, true)];
       // 使用真实 DOM 重现横幅与帖子共用 article 类，以及单页路由延迟替换正文。
-      await command('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/jump#!article/StudyShare/7?byr_highlight=资料' });
+      await command('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/jump#!article/StudyShare/7?byr_highlight=' + encodeURIComponent('资料|teacher|C++') });
       const waitForHighlight = async (id) => {
         for (let count = 0; count < 50; count += 1) {
           if (await evaluate(`document.querySelector('.byr-search-jump-highlight')?.id === '${id}'`)) return;
@@ -499,9 +500,15 @@ server.listen(0, "127.0.0.1", () => {
       };
       await waitForHighlight('post0');
       if (await evaluate(`document.getElementById('banner').classList.contains('byr-search-jump-highlight')`)) throw new Error('主题跳转错误高亮了论坛横幅');
+      if (!await evaluate(`(()=>{const matches=[...CSS.highlights.get('byr-search-terms')];return matches.length===5 && matches.filter(range=>range.toString()==='资料').length===3 && matches.some(range=>range.toString()==='TeAcHer') && matches.some(range=>range.toString()==='C++') && matches.every(range=>document.getElementById('post0').contains(range.commonAncestorContainer));})()`)) throw new Error('文字高亮应支持跨标签、大小写和正则特殊字符，且只匹配目标帖正文和作者');
+      if (!await evaluate(`document.getElementById('original-link').click();linkClicks===1 && document.querySelector('#post0 b').textContent==='资' && !document.querySelector('#post0 mark')`)) throw new Error('文字高亮不能改变原有标签或破坏链接事件');
       await evaluate(`location.hash='!article/StudyShare/7?p=1&byr_highlight=资料#a4'`);
       await waitForHighlight('post4');
       if (!await evaluate(`document.querySelector('.byr-search-jump-badge').textContent==='搜索命中 · 第 4 楼'`)) throw new Error('回帖高亮楼层标记错误');
+      if (!await evaluate(`CSS.highlights.get('byr-search-terms').size===1 && [...CSS.highlights.get('byr-search-terms')][0].toString()==='资料'`)) throw new Error('跳到回帖时应移除楼主文字高亮，仅保留回帖命中');
+      await evaluate(`document.querySelector('#post4 .a-content-wrap').firstChild.data='新增资料和资料'`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (!await evaluate(`CSS.highlights.get('byr-search-terms').size===2`)) throw new Error('同一帖文字延迟更新后应重新匹配');
       await evaluate(`location.hash='!article/StudyShare/8?byr_highlight=资料';setTimeout(renderPosts,100)`);
       await waitForHighlight('post0');
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -510,7 +517,8 @@ server.listen(0, "127.0.0.1", () => {
       await evaluate(`location.hash='!board/StudyShare'`);
       await new Promise((resolve) => setTimeout(resolve, 50));
       if (await evaluate(`!!document.querySelector('.byr-search-jump-highlight,.byr-search-jump-badge')`)) throw new Error('离开搜索目标后应清除高亮');
-      result.jumpHighlights = { thread: true, reply: true, delayedRender: true, bannerExcluded: true };
+      if (await evaluate(`CSS.highlights.has('byr-search-terms')`)) throw new Error('离开搜索目标后应清除文字高亮');
+      result.jumpHighlights = { thread: true, reply: true, delayedRender: true, bannerExcluded: true, textRanges: true, crossInlineTags: true, linksPreserved: true, textUpdates: true };
       console.log(JSON.stringify(result));
       if (!result.ok) process.exitCode = 1;
     } catch (error) {

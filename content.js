@@ -1,5 +1,5 @@
 /*
- * 邮人全搜论坛页面脚本：在论坛页面增加一个打开本地搜索页的入口。
+ * 邮人全搜论坛页面脚本：提供搜索入口，并定位、高亮搜索命中的帖子和文字。
  * 账号登录由用户自己完成，数据请求由扩展后台使用现有浏览器登录态完成。
  * JSON 接口与论坛原生 GBK 搜索页均只读取响应，不读取或保存 Cookie 值。
  */
@@ -113,6 +113,13 @@ function installByrJumpHighlight() {
         color: #3b2500;
         font: 700 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
+      ::highlight(byr-search-terms) {
+        background-color: #ffe066;
+        color: #7a2200;
+        text-decoration: underline;
+        text-decoration-color: #c45d00;
+        text-decoration-thickness: 2px;
+      }
     `;
     document.head.appendChild(style);
   };
@@ -130,6 +137,7 @@ function installByrJumpHighlight() {
   };
 
   const clearHighlight = () => {
+    window.CSS?.highlights?.delete("byr-search-terms");
     if (highlighted) {
       highlighted.classList.remove("byr-search-jump-highlight");
       const badge = highlighted.querySelector(":scope > .byr-search-jump-badge");
@@ -138,6 +146,46 @@ function installByrJumpHighlight() {
     }
     highlighted = null;
     previousPosition = "";
+  };
+
+  const highlightText = (request, target) => {
+    if (!window.CSS?.highlights || !window.Highlight) return null;
+    const terms = [...new Set(request.terms)].sort((a, b) => b.length - a.length)
+      .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const ranges = [];
+    // 只读取正文、作者账号和昵称，排除回复按钮、楼层标记等界面文字。
+    const roots = target.querySelectorAll(".a-content-wrap, .a-u-name, .a-u-uid");
+    if (terms.length) {
+      const pattern = new RegExp(terms.join("|"), "giu");
+      roots.forEach((root) => {
+        const nodes = [];
+        let text = "";
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+          acceptNode: (node) => node.parentElement.closest("script, style, textarea, input, button, [contenteditable], [hidden]")
+            ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+        });
+        let node;
+        while ((node = walker.nextNode())) {
+          nodes.push({ node, start: text.length, end: text.length + node.length });
+          text += node.data;
+        }
+        // 连续文字可以跨越内联标签，使用 Range 保留论坛原有 DOM 与事件。
+        let index = 0;
+        for (const match of text.matchAll(pattern)) {
+          const end = match.index + match[0].length;
+          while (nodes[index].end <= match.index) index += 1;
+          const startNode = nodes[index];
+          while (nodes[index].end < end) index += 1;
+          const endNode = nodes[index];
+          const range = document.createRange();
+          range.setStart(startNode.node, match.index - startNode.start);
+          range.setEnd(endNode.node, end - endNode.start);
+          ranges.push(range);
+        }
+      });
+    }
+    window.CSS.highlights.set("byr-search-terms", new Highlight(...ranges));
+    return ranges[0] || null;
   };
 
   const findTarget = (request) => {
@@ -169,7 +217,11 @@ function installByrJumpHighlight() {
     badge.className = "byr-search-jump-badge";
     badge.textContent = request.position ? `搜索命中 · 第 ${request.position} 楼` : "搜索命中";
     target.appendChild(badge);
-    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    const firstMatch = highlightText(request, target);
+    const rect = firstMatch?.getBoundingClientRect();
+    if (rect?.height) {
+      window.scrollBy({ top: rect.top - Math.max(96, window.innerHeight * 0.35), behavior: "smooth" });
+    } else target.scrollIntoView({ block: "center", behavior: "smooth" });
   };
 
   const run = () => {
@@ -181,14 +233,17 @@ function installByrJumpHighlight() {
     const attempt = () => {
       const target = findTarget(request);
       if (!target) return false;
-      if (target === highlighted) return true;
+      if (target === highlighted) {
+        highlightText(request, target);
+        return true;
+      }
       applyHighlight(request, target);
       return true;
     };
     // 单页路由可能先显示旧内容再替换，继续观察，直到真正的帖子容器渲染完成。
     attempt();
     observer = new MutationObserver(attempt);
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, characterData: true, subtree: true });
     timer = window.setTimeout(() => observer?.disconnect(), 15000);
   };
 
