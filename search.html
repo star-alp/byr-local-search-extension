@@ -159,22 +159,22 @@
         </details>
 
       <details class="sidebar-details performance-section">
-        <summary><span class="summary-title">请求速度</span><span id="performance-summary" class="summary-meta">高速 · 同时 6 个 · 每 100 毫秒启动</span></summary>
+        <summary><span class="summary-title">请求速度</span><span id="performance-summary" class="summary-meta">极速 · 同时 8 个 · 每 50 毫秒启动</span></summary>
         <div class="details-content">
           <div class="performance-grid">
             <label class="field-label" for="request-speed">选择请求速度<select id="request-speed" class="input-control">
-              <option value="stable">稳定（同时 2 个，每 500 毫秒启动）</option>
-              <option value="fast">快速（同时 4 个，每 200 毫秒启动）</option>
-              <option value="high" selected>高速（同时 6 个，每 100 毫秒启动）</option>
+              <option value="stable">省资源（同时 2 个，每 500 毫秒启动）</option>
+              <option value="fast">平衡（同时 4 个，每 200 毫秒启动）</option>
+              <option value="high" selected>极速（同时 8 个，每 50 毫秒启动）</option>
               <option value="custom">自定义</option>
             </select></label>
           </div>
           <div id="custom-performance" class="performance-grid performance-custom" hidden>
-            <label class="field-label" for="request-concurrency">同时请求数<input id="request-concurrency" class="input-control" type="number" min="1" max="8" value="6"></label>
-            <label class="field-label" for="request-delay">请求启动间隔（毫秒）<input id="request-delay" class="input-control" type="number" min="50" max="5000" step="50" value="100"></label>
+            <label class="field-label" for="request-concurrency">同时请求数<input id="request-concurrency" class="input-control" type="number" min="1" max="8" value="8"></label>
+            <label class="field-label" for="request-delay">请求启动间隔（毫秒）<input id="request-delay" class="input-control" type="number" min="50" max="5000" step="50" value="50"></label>
           </div>
           <div class="performance-live-row"><span id="performance-live-status">当前空闲</span><span>修改后对后续任务立即生效</span></div>
-          <p class="field-help">“同时请求数”控制最多同时处理多少个请求；“请求启动间隔”控制所有请求之间至少等待多久。高速适合短时间在线搜索，大范围索引建议改用快速或稳定。</p>
+          <p class="field-help">“同时请求数”控制最多同时处理多少个请求；“请求启动间隔”控制所有请求之间至少等待多久。极速适合短时间在线搜索，大范围索引建议改用平衡或省资源。</p>
         </div>
       </details>
 

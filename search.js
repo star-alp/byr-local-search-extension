@@ -6,9 +6,9 @@
 const DB_NAME = "byr-local-search";
 const DB_VERSION = 2;
 const PERFORMANCE_PRESETS = Object.freeze({
-  stable: { label: "稳定", concurrency: 2, delayMs: 500 },
-  fast: { label: "快速", concurrency: 4, delayMs: 200 },
-  high: { label: "高速", concurrency: 6, delayMs: 100 }
+  stable: { label: "省资源", concurrency: 2, delayMs: 500 },
+  fast: { label: "平衡", concurrency: 4, delayMs: 200 },
+  high: { label: "极速", concurrency: 8, delayMs: 50 }
 });
 const DEFAULT_REQUEST_PRESET = "high";
 const DEFAULT_REQUEST_CONCURRENCY = PERFORMANCE_PRESETS[DEFAULT_REQUEST_PRESET].concurrency;
