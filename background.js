@@ -3,6 +3,8 @@
  * 扩展不读取或保存用户密码、Cookie 值，也不会把论坛响应发送到第三方服务器。
  */
 
+importScripts("forum-client.js");
+
 const SEARCH_PAGE = chrome.runtime.getURL("search.html");
 
 async function findForumTab(sourceTabId) {
@@ -84,9 +86,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .catch((error) => sendResponse({
       ok: false,
       status: 0,
-      error: /Receiving end does not exist|Could not establish connection/iu.test(error.message || "")
-        ? "论坛页面连接未恢复，请刷新论坛页面后重试"
-        : error.message || "无法连接论坛页面，请刷新论坛页面后重试"
+      error: ByrForumClient.userMessage(error, "无法连接论坛页面，请刷新论坛页面后重试")
     }));
   return true;
 });

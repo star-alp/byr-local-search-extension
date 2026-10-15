@@ -104,6 +104,27 @@ test("恢复快照时，在途页面回到待处理状态，完成页面保持�
   assert.equal(task.jobs[1].status, "running");
 });
 
+test("按错误类型区分登录失效和内容权限不足，中文提示不会误暂停任务", async () => {
+  const tasks = engine();
+  const { api } = page();
+  const task = tasks.create("online", [board], options);
+  [1, 2].forEach((page) => tasks.enqueue(task, { kind: "article", board, post: { gid: "10" }, page }));
+  await tasks.run(task, async (job) => {
+    if (job.page === 1) throw api.ForumClient.errorFromResponse({ status: 403 });
+  }, () => 1, () => {}, new Set());
+  assert.equal(task.phase, "partial");
+  assert.equal(task.jobs[0].status, "failed");
+  assert.equal(task.jobs[1].status, "done");
+
+  task.jobs[0].status = "pending";
+  await tasks.run(task, async () => {
+    throw api.ForumClient.errorFromResponse({ status: 401 });
+  }, () => 1, () => {}, new Set());
+  assert.equal(task.phase, "paused");
+  assert.equal(task.jobs[0].status, "pending");
+  assert.ok(task.error.includes("打开论坛登录"));
+});
+
 test("并发配置动态生效并始终限制活跃任务数", async () => {
   const tasks = engine();
   const task = tasks.create("index", [board], options);
@@ -195,6 +216,60 @@ test("论坛响应分类区分登录失效、主题失效和普通非 JSON", () 
   assert.equal(api.ForumClient.errorFromResponse({ status: 200, data: { success: false, code: "THREAD_NOT_FOUND", message: "主题不存在" } }).code, "THREAD_NOT_FOUND");
   assert.equal(api.ForumClient.errorFromResponse({ status: 200, data: { success: false, code: "NON_JSON_RESPONSE", message: "论坛返回了非 JSON 内容" } }).code, "NON_JSON_RESPONSE");
   assert.equal(api.ForumClient.nonJsonData("sys exception: \\\"\\\" in threads.php", { headers: { get: () => "text/html" } }).code, "THREAD_NOT_FOUND");
+});
+
+test("论坛英文登录响应、登录页和错误代码均转换为中文操作提示", () => {
+  const { api } = page();
+  const client = api.ForumClient;
+  for (const message of ["You haven't login", "You are not logged in.", "Please login first!", "Login required", "Unauthorized", "Your session has expired"]) {
+    const error = client.errorFromResponse({ status: 200, data: { success: false, message } });
+    assert.equal(error.code, "LOGIN_REQUIRED", message);
+    assert.ok(error.message.includes("打开论坛登录"));
+    assert.equal(error.message.includes(message), false);
+    assert.equal(client.isRetryable(error), false);
+  }
+  assert.equal(client.errorFromResponse({ data: { success: false, code: "NOT_LOGGED_IN" } }).code, "LOGIN_REQUIRED");
+  const loginPage = client.nonJsonData('<html><p>Please login first!</p></html>');
+  assert.equal(loginPage.code, "LOGIN_REQUIRED");
+  assert.ok(loginPage.message.includes("打开论坛登录"));
+});
+
+test("浏览器英文连接与存储异常使用中文，已有中文反馈保持原意", () => {
+  const { api, context } = page();
+  const client = api.ForumClient;
+  const cases = [
+    ["Could not establish connection. Receiving end does not exist.", "论坛页面"],
+    ["A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received", "论坛页面"],
+    ["No tab with id: 123.", "论坛页面"],
+    ["Extension context invalidated.", "重新打开插件"],
+    ["Failed to fetch", "网络"],
+    ["QuotaExceededError: The quota has been exceeded.", "存储空间不足"],
+    ["Failed to execute 'transaction' on 'IDBDatabase': The database connection is closing.", "本地数据"],
+    ["Some unexpected internal error", "操作未完成"]
+  ];
+  for (const [raw, expected] of cases) {
+    const translated = client.userMessage(new Error(raw));
+    assert.ok(translated.includes(expected), raw);
+    assert.equal(translated.includes(raw), false);
+  }
+  assert.equal(client.userMessage("已保存 3 条在线结果到本地索引"), "已保存 3 条在线结果到本地索引");
+  assert.equal(client.userMessage("请先填写范围名称"), "请先填写范围名称");
+  assert.equal(client.userMessage("Unknown error", "保存会话失败，请重试"), "保存会话失败，请重试");
+  vm.runInContext('showToast("Could not establish connection. Receiving end does not exist.");', context);
+  assert.ok(context.document.querySelector("#toast").textContent.includes("论坛页面"));
+  assert.equal(context.document.querySelector("#toast").textContent.includes("Could not"), false);
+  context.window.clearTimeout(api.state.toastTimer);
+});
+
+test("消息通道直接拒绝时也转换为中文，未登录请求只发送一次", async () => {
+  const { api, context } = page();
+  vm.runInContext("waitForRequestTurn = async () => {};", context);
+  context.chrome.runtime.sendMessage = async () => { throw new Error("Could not establish connection. Receiving end does not exist."); };
+  await assert.rejects(api.requestApi("/n/b/section.json"), (error) => error.code === "PAGE_CONNECTION_FAILED" && error.message.includes("论坛页面"));
+  let calls = 0;
+  context.chrome.runtime.sendMessage = async () => { calls += 1; return { ok: true, data: { success: false, message: "You haven't login" } }; };
+  await assert.rejects(api.requestApi("/n/b/section.json"), (error) => error.code === "LOGIN_REQUIRED" && error.message.includes("打开论坛登录"));
+  assert.equal(calls, 1);
 });
 
 test("自动重试仅处理临时故障，并遵守服务器要求的等待时间", () => {

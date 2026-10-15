@@ -23,12 +23,14 @@ const scenario = String.raw`
   let indexFixture = false;
   let indexFailPage2 = true;
   let transientFailures = 2;
+  let loggedOut = !resume;
   window.confirm = () => true;
   globalThis.chrome = { runtime: { async sendMessage(message) {
     const url = new URL(message.path, 'https://bbs.byr.cn');
     const pathname = url.pathname;
     counts[message.path] = (counts[message.path] || 0) + 1;
     await new Promise(resolve => setTimeout(resolve, 8));
+    if (pathname === '/n/b/section.json' && loggedOut) return { ok: true, status: 200, data: { success: false, message: "You haven't login" } };
     if (pathname === '/n/b/section.json') return { ok: true, sourceTabId: 1, data: { success: true, data: {
       boards: [{ dir: true, name: '测试分区', children: [{ dir: false, name: '谈天说地', desc: 'Talking' }, { dir: false, name: '学习交流', desc: 'StudyShare' }] }]
     } } };
@@ -112,6 +114,12 @@ const scenario = String.raw`
   }
   document.documentElement.dataset.smoke = 'initializing';
   await init();
+  if (!resume) {
+    const notice = document.querySelector('#toast').textContent;
+    assert(notice.includes('打开论坛登录') && !notice.includes("haven't login"), '未登录初始化时右下角必须显示中文登录指引');
+    loggedOut = false;
+    await loadBoards();
+  }
   assert(state.sessionPages.size === 0 && state.sessionCacheBytes === 0, '页面重新打开不能从持久存储恢复正文会话缓存');
   assert(state.searchMode === 'online', '默认应为在线');
   assert(document.querySelector('#search-settings').hidden, '首页设置应折叠');
@@ -480,7 +488,7 @@ const scenario = String.raw`
   assert(!document.querySelector('#search-settings').hidden, '设置应可展开');
   setSettingsOpen(false);
   const result = { ok: true, onlineHits: state.onlineDocuments.length, savedDocuments: saved.length, orQueries: true, cacheFindsPreviouslyUnmatched: true, cacheReducesRequests: true, cacheScopeProtected: true, cacheExpiry: true, forceRefresh: true, replyMatchesOwnFields: true, nativePagination: true, nativePageLimit: true, nativeRetryOnlyFailed: true, mixedTimeSort: true, checkpointRecovered: true, reopenedPageRecovered: true, retryWithoutRepeating: true, historyPreserved: true, privacyAndResourcesInDialog: true, searchContinuesInModal: true, explicitPresetSelection: true, rangeInSidebar: true, manualFirst: true, presetSkipsManualPicker: true, scopePresets: state.scopePresets.length, presetsRemainIndependent: true, taskScopeProtected: true, scopeFiltersLocal: true };
-  Object.assign(result, { adaptiveRetries: true, retryBackoff: true, coverageMatchesScope: true, fillOnlyMissingPages: true, completedTopicsSkipped: true, incrementalToggleWorks: true, compactSnippets: true, replyExpansionPreserved: true });
+  Object.assign(result, { adaptiveRetries: true, retryBackoff: true, coverageMatchesScope: true, fillOnlyMissingPages: true, completedTopicsSkipped: true, incrementalToggleWorks: true, compactSnippets: true, replyExpansionPreserved: true, loggedOutNoticeChinese: true });
   document.body.insertAdjacentHTML('beforeend', '<pre id="integration-result">' + JSON.stringify(result) + '</pre>');
   document.documentElement.dataset.smoke = 'finished';
 })().catch(error => document.body.insertAdjacentHTML('beforeend', '<pre id="integration-result">' + JSON.stringify({ ok: false, error: error.message, stack: error.stack }) + '</pre>'));

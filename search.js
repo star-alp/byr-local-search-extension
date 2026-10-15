@@ -251,7 +251,7 @@ function rememberIndexedPages(task) {
   if (changed) {
     try { saveIndexMetadata(); } catch (error) {
       task.pauseRequested = true;
-      task.error = `索引进度保存失败，请检查浏览器存储：${error.message}`;
+      task.error = `索引进度保存失败，请检查浏览器存储：${ForumClient.userMessage(error)}`;
     }
   }
 }
@@ -566,7 +566,7 @@ function saveScopePreset() {
     $("#manual-board-details").open = false;
     renderScopePresets();
   } catch (error) {
-    feedback.textContent = error.message || "范围保存失败";
+    feedback.textContent = ForumClient.userMessage(error, "范围保存失败，请重试");
   }
 }
 
@@ -784,7 +784,7 @@ function normalizePerformanceInput() {
 
 function showToast(message) {
   const toast = $("#toast");
-  toast.textContent = message;
+  toast.textContent = ForumClient.userMessage(message);
   toast.classList.add("is-visible");
   window.clearTimeout(state.toastTimer);
   state.toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 3600);
@@ -1074,7 +1074,8 @@ async function requestForum(path, task, textMode = false) {
       state.requestPolicy.succeeded();
       updatePerformanceLiveStatus();
       return textMode ? text : response.data;
-    } catch (error) {
+    } catch (cause) {
+      const error = cause instanceof ForumClient.ForumRequestError ? cause : ForumClient.errorFromResponse({ error: cause?.message });
       if (!ForumClient.isRetryable(error)) throw error;
       state.requestPolicy.failed(error, attempt);
       updatePerformanceLiveStatus();
@@ -1806,7 +1807,7 @@ function updateTaskStatus(task, active = 0) {
     + (metrics.skipped ? ` · 跳过 ${metrics.skipped} 个失效主题` : "")
     + (task.cachePages ? ` · 复用 ${task.cachePages} 个内容页（${formatTime(task.cacheOldestAt)} 获取）` : "")
     + (metrics.failures.length ? ` · 失败 ${metrics.failures.length} 项` : "")
-    + (task.error ? ` · ${task.error}` : "");
+    + (task.error ? ` · ${ForumClient.userMessage(task.error)}` : "");
   const compact = task.mode === "online"
     ? `${phaseLabel} · 已找到 ${state.onlineDocuments.length} 条`
     : `${labels[task.phase]} · 已读取 ${metrics.boardPages + metrics.contentPages} 页 · 已完成版面 ${metrics.boards}/${metrics.boardTotal}`;
@@ -1828,7 +1829,7 @@ function updateTaskStatus(task, active = 0) {
   $("#task-failures").hidden = !failedJobs.length;
   $("#task-failures-summary").textContent = `失败任务（${failedJobs.length}）`;
   $("#task-failures-list").innerHTML = failedJobs.map((job) =>
-    `<p>${job.mode === "online" ? "在线搜索" : "本地更新"} · ${escapeHtml(job.board.description)} · ${job.kind === "native" ? "论坛快速搜索" : job.kind === "board" ? "主题列表" : `主题 ${escapeHtml(job.post.gid)}`} 第 ${job.page || 1} 页：${escapeHtml(job.error)}</p>`
+    `<p>${job.mode === "online" ? "在线搜索" : "本地更新"} · ${escapeHtml(job.board.description)} · ${job.kind === "native" ? "论坛快速搜索" : job.kind === "board" ? "主题列表" : `主题 ${escapeHtml(job.post.gid)}`} 第 ${job.page || 1} 页：${escapeHtml(ForumClient.userMessage(job.error, "论坛请求失败，请重试"))}</p>`
   ).join("");
   const skippedJobs = Object.values(state.tasks).filter(Boolean).flatMap((item) =>
     item.jobs.filter((job) => job.status === "done" && job.skipped && !job.ignored).map((job) => ({ ...job, mode: item.mode }))
@@ -1837,7 +1838,7 @@ function updateTaskStatus(task, active = 0) {
   $("#task-skipped-summary").textContent = `已跳过主题（${skippedJobs.length}）`;
   $("#task-skipped-list").innerHTML = skippedJobs.map((job) => {
     const href = threadUrl({ type: "thread", board: job.board.name, gid: job.post.gid });
-    return `<p><span>${escapeHtml(job.board.description)} · 主题 ${escapeHtml(job.post.gid)}：${escapeHtml(job.skipReason || "主题不存在或主题数据无效")}</span><a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">打开</a><button type="button" data-retry-skipped="${escapeHtml(`${job.mode}:${job.id}`)}">重新检查</button></p>`;
+    return `<p><span>${escapeHtml(job.board.description)} · 主题 ${escapeHtml(job.post.gid)}：${escapeHtml(ForumClient.userMessage(job.skipReason, "主题不存在或主题数据无效"))}</span><a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">打开</a><button type="button" data-retry-skipped="${escapeHtml(`${job.mode}:${job.id}`)}">重新检查</button></p>`;
   }).join("");
   updateOnlineSearchControls();
   updatePerformanceLiveStatus();
@@ -1928,7 +1929,7 @@ function queueCheckpoint() {
   state.checkpointTimer = window.setTimeout(() => {
     state.checkpointTimer = null;
     persistTasks().catch((error) => {
-      if (!state.checkpointError) showToast("进度保存失败；请保持页面打开：" + error.message);
+      if (!state.checkpointError) showToast("进度保存失败；请保持页面打开：" + ForumClient.userMessage(error));
       state.checkpointError = error.message;
     });
   }, 500);
@@ -2078,7 +2079,7 @@ async function runTask(task) {
     state.checkpointError = "";
   } catch (error) {
     task.phase = "paused";
-    task.error = "任务暂停：" + (error.message || "无法保存进度");
+    task.error = "任务暂停：" + ForumClient.userMessage(error, "无法保存进度");
   } finally {
     state.onlineSearchRunning = false;
     state.indexRunning = false;
@@ -2087,7 +2088,7 @@ async function runTask(task) {
     if (task.mode === "index") {
       task.boards.forEach((board) => { state.indexCoverage[board.name] = boardTaskCoverage(task, board.name); });
       try { localStorage.setItem(INDEX_COVERAGE_STORAGE_KEY, JSON.stringify(state.indexCoverage)); }
-      catch (error) { showToast(`索引内容已保留，覆盖状态保存失败：${error.message}`); }
+      catch (error) { showToast(`索引内容已保留，覆盖状态保存失败：${ForumClient.userMessage(error)}`); }
     }
     updateTaskStatus(task);
     renderResults();

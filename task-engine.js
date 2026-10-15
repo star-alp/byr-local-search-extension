@@ -93,7 +93,7 @@ globalThis.ByrTasks = (() => {
           Promise.resolve().then(() => worker(job))
             .then(() => { job.status = "done"; delete job.error; })
             .catch((error) => {
-              if (error.name === "AbortError" || error.fatal || String(error.message).includes("登录")) {
+              if (error.name === "AbortError" || error.fatal || error.code === "LOGIN_REQUIRED" || (!error.code && String(error.message).includes("登录"))) {
                 job.status = "pending";
                 task.pauseRequested = true;
                 if (error.name !== "AbortError") task.error = error.message;

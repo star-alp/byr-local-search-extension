@@ -60,6 +60,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ? new TextDecoder("gbk").decode(buffer)
         : new TextDecoder("utf-8").decode(buffer);
       const retryAfterMs = globalThis.ByrForumClient?.retryAfterMs(response.headers.get("retry-after")) || 0;
+      if (response.redirected && /\/(?:n\/)?login(?:[/?#]|$)/u.test(response.url)) {
+        sendResponse({ ok: false, status: 401, data: { success: false, code: "LOGIN_REQUIRED" } });
+        return;
+      }
       if (message.responseType === "text-gbk") {
         sendResponse({ ok: response.ok, status: response.status, retryAfterMs, text });
         return;
@@ -76,7 +80,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       sendResponse({ ok: response.ok, status: response.status, retryAfterMs, data });
     })
-    .catch((error) => sendResponse({ ok: false, status: 0, code: error.name === "AbortError" ? "REQUEST_TIMEOUT" : "NETWORK_ERROR", error: error.name === "AbortError" ? "请求超时" : error.message }))
+    .catch((error) => sendResponse({ ok: false, status: 0, code: error.name === "AbortError" ? "REQUEST_TIMEOUT" : "NETWORK_ERROR", error: error.name === "AbortError" ? "请求超时，请稍后重试" : "论坛网络连接中断，请检查网络后重试" }))
     .finally(() => window.clearTimeout(timeout));
 
   return true;
