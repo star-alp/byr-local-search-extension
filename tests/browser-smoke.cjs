@@ -20,6 +20,9 @@ const scenario = String.raw`
   let failNativeThirdPage = true;
   let cacheContent = '可复用资料';
   let omitThread9 = false;
+  let indexFixture = false;
+  let indexFailPage2 = true;
+  let transientFailures = 2;
   window.confirm = () => true;
   globalThis.chrome = { runtime: { async sendMessage(message) {
     const url = new URL(message.path, 'https://bbs.byr.cn');
@@ -29,6 +32,21 @@ const scenario = String.raw`
     if (pathname === '/n/b/section.json') return { ok: true, sourceTabId: 1, data: { success: true, data: {
       boards: [{ dir: true, name: '测试分区', children: [{ dir: false, name: '谈天说地', desc: 'Talking' }, { dir: false, name: '学习交流', desc: 'StudyShare' }] }]
     } } };
+    if (pathname === '/n/b/article/Talking/601.json') {
+      if (transientFailures-- > 0) return { ok: false, status: 503 };
+      return { ok: true, data: { success: true, data: {} } };
+    }
+    if (indexFixture && pathname === '/n/b/board/Talking.json') return { ok: true, data: { success: true, data: {
+      pagination: { total: 1 }, posts: [{ gid: '600', title: '索引资料测试', replyCount: 29, time: 123 }]
+    } } };
+    if (indexFixture && pathname === '/n/b/article/Talking/600.json') {
+      const page = Number(url.searchParams.get('page'));
+      if (page === 2 && indexFailPage2) return { ok: false, status: 403, error: '模拟第二页暂不可读' };
+      return { ok: true, data: { success: true, data: { pagination: { total: 3 }, title: '索引资料测试',
+        head: { id: '600', content: '索引资料正文', poster: { id: 'alice' } },
+        articles: [{ id: 'index-' + page, pos: page * 10 - 1, content: '索引资料回帖第' + page + '页', poster: { id: 'bob' } }]
+      } } };
+    }
     if (pathname === '/s/article' && !resume && !modalOpenedDuringSearch) {
       document.querySelector('#open-settings').click();
       modalOpenedDuringSearch = true;
@@ -315,7 +333,7 @@ const scenario = String.raw`
   assert(state.onlineDocuments.filter(doc => doc.gid === '71' && doc.type === 'thread').length === 1, '快速候选和正文应合并成一条主题结果');
   const cards = [...document.querySelectorAll('.result-card')].filter(card => card.querySelector('.result-kind').textContent === '帖子');
   assert(cards[0].textContent.includes('主题71') && cards[1].textContent.includes('主题70'), '综合结果应按真实时间将新主题排在旧主题之前');
-  assert(document.querySelector('#result-list').textContent.includes('命中：回帖'), '结果应显示回帖命中字段');
+  assert(document.querySelector('#result-list').textContent.includes('回帖（2 条）'), '父级结果应显示回帖命中数量');
   document.querySelector('#index-board-all').checked = true;
   document.querySelector('#index-board-all').dispatchEvent(new Event('change'));
   await startOnlineSearch();
@@ -391,10 +409,78 @@ const scenario = String.raw`
   assert(!state.onlineDocuments.length, '过期缓存不能用于立即预览');
   await expiredSearch;
   assert(state.onlineDocuments.length === 3 && !state.tasks.online.cachePages, '过期正文应重新获取并匹配新内容');
+  const retryTask = { requests: 0 };
+  const retryStart = performance.now();
+  await requestApi('/n/b/article/Talking/601.json?page=1', retryTask);
+  assert(retryTask.requests === 3 && retryTask.retries === 2, '服务器临时故障应最多自动重试两次并保留请求计数');
+  assert(performance.now() - retryStart >= 1450, '两次自动重试必须实际等待退避时间');
+  assert(state.requestPolicy.limits(8, 50).reduced, '连续故障后应临时降低同时请求数');
+  state.requestPolicy = ForumClient.createRequestPolicy();
+  indexFixture = true;
+  document.querySelector('#index-board-pages').value = '1';
+  document.querySelector('#index-thread-pages').value = '3';
+  updateIndexRangeSummary();
+  const indexBoard = state.boards.find(board => board.name === 'Talking');
+  const indexTask = ByrTasks.create('index', [indexBoard], readIndexOptions());
+  enqueuePage(indexTask, 'board', indexBoard);
+  [1, 2, 3].forEach(page => enqueuePage(indexTask, 'article', indexBoard, page, { gid: '600', title: '索引资料测试', replyCount: 29, time: 123 }));
+  state.tasks.index = indexTask;
+  await runTask(indexTask);
+  assert(state.tasks.index.phase === 'partial', '索引单页失败应保留部分完成状态');
+  assert(!state.indexMetadata['Talking:600'].complete && state.indexMetadata['Talking:600'].readPages.join(',') === '1,3', '末页成功不能将缺少第二页的主题记为完整索引');
+  renderIndexCoverage();
+  assert(document.querySelector('#index-coverage-list').textContent.includes('部分索引'), '有缺页时覆盖状态应显示部分索引');
+  const pageCount = page => counts['/n/b/article/Talking/600.json?page=' + page] || 0;
+  const pageCounts = [pageCount(1), pageCount(2), pageCount(3)];
+  indexFailPage2 = false;
+  await startMissingIndex();
+  assert(state.tasks.index.phase === 'complete', '只更新缺口后应完成当前范围');
+  assert(pageCount(1) === pageCounts[0] && pageCount(3) === pageCounts[2] && pageCount(2) === pageCounts[1] + 1, '补缺口应只请求缺失的第二页');
+  assert(ByrTasks.metrics(state.tasks.index).reusedPages === 2 && ByrTasks.metrics(state.tasks.index).contentPages === 1, '复用页不能冒充本轮新读取页');
+  renderIndexCoverage();
+  assert(document.querySelector('#index-coverage-list .is-complete') && state.indexMetadata['Talking:600'].complete, '补全后应显示当前范围已完成');
+  const completedCounts = [pageCount(1), pageCount(2), pageCount(3)];
+  document.querySelector('#fill-index-gaps').click();
+  for (let attempt = 0; attempt < 100 && state.indexRunning; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+  assert(state.tasks.index.phase === 'complete' && [pageCount(1), pageCount(2), pageCount(3)].join(',') === completedCounts.join(','), '从按钮再次补缺口应跳过未变化且已完成的主题');
+  document.querySelector('#index-incremental').checked = false;
+  await startNewTask('index');
+  assert([pageCount(1), pageCount(2), pageCount(3)].every((count, index) => count === completedCounts[index] + 1), '关闭增量更新后必须重新读取完整主题范围');
+  document.querySelector('#index-incremental').checked = true;
+  loadIndexMetadata();
+  assert(state.indexCoverage.Talking.complete, '索引覆盖状态刷新后应保留');
+  document.querySelector('#index-board-pages').value = '2';
+  updateIndexRangeSummary();
+  renderIndexCoverage();
+  assert(!document.querySelector('#index-coverage-list .is-complete'), '扩大范围后不能沿用旧范围完成状态');
+  document.querySelector('#index-board-pages').value = '1';
+  updateIndexRangeSummary();
+  const originalOnline = state.onlineDocuments;
+  state.onlineDocuments = [
+    { id: 'thread:Talking:800', type: 'thread', board: 'Talking', gid: '800', title: '资料标题', content: '资料'.repeat(400), author: 'alice' },
+    ...Array.from({ length: 5 }, (_, index) => ({ id: 'reply:Talking:800:' + (index + 1), type: 'reply', board: 'Talking', gid: '800', articleId: 'reply-id-' + (index + 1), pos: index + 1, title: '资料标题', content: '资料回帖'.repeat(80), author: 'bob' }))
+  ];
+  document.querySelector('#query-input').value = '资料';
+  state.onlineQuery = '资料';
+  renderResults();
+  const folded = document.querySelector('.result-child-more');
+  assert(folded && !folded.open && document.querySelectorAll('.result-children > .result-child').length === 2, '默认只展示两条命中回帖');
+  const parentSnippet = document.querySelector('.result-group-main > .result-snippet');
+  assert(parentSnippet.clientHeight <= Number.parseFloat(getComputedStyle(parentSnippet).lineHeight) * 2 + 1, '长主题摘要应限制为两行');
+  assert(document.querySelector('.result-child').href.includes('byr_article_id=reply-id-'), '压缩后的回帖仍应整块可点击并携带准确编号');
+  folded.open = true;
+  await new Promise(resolve => setTimeout(resolve, 30));
+  renderResults();
+  assert(document.querySelector('.result-child-more').open, '在线结果刷新后不能自动收起用户展开的命中回帖');
+  state.onlineDocuments = originalOnline;
+  document.querySelector('#query-input').value = '已更新正文';
+  state.onlineQuery = '已更新正文';
+  renderResults();
   setSettingsOpen(true);
   assert(!document.querySelector('#search-settings').hidden, '设置应可展开');
   setSettingsOpen(false);
   const result = { ok: true, onlineHits: state.onlineDocuments.length, savedDocuments: saved.length, orQueries: true, cacheFindsPreviouslyUnmatched: true, cacheReducesRequests: true, cacheScopeProtected: true, cacheExpiry: true, forceRefresh: true, replyMatchesOwnFields: true, nativePagination: true, nativePageLimit: true, nativeRetryOnlyFailed: true, mixedTimeSort: true, checkpointRecovered: true, reopenedPageRecovered: true, retryWithoutRepeating: true, historyPreserved: true, privacyAndResourcesInDialog: true, searchContinuesInModal: true, explicitPresetSelection: true, rangeInSidebar: true, manualFirst: true, presetSkipsManualPicker: true, scopePresets: state.scopePresets.length, presetsRemainIndependent: true, taskScopeProtected: true, scopeFiltersLocal: true };
+  Object.assign(result, { adaptiveRetries: true, retryBackoff: true, coverageMatchesScope: true, fillOnlyMissingPages: true, completedTopicsSkipped: true, incrementalToggleWorks: true, compactSnippets: true, replyExpansionPreserved: true });
   document.body.insertAdjacentHTML('beforeend', '<pre id="integration-result">' + JSON.stringify(result) + '</pre>');
   document.documentElement.dataset.smoke = 'finished';
 })().catch(error => document.body.insertAdjacentHTML('beforeend', '<pre id="integration-result">' + JSON.stringify({ ok: false, error: error.message, stack: error.stack }) + '</pre>'));
@@ -521,6 +607,12 @@ server.listen(0, "127.0.0.1", () => {
         return layout;
       };
       result.layouts = [await checkLayout(false, 1280), await checkLayout(true, 1280), await checkLayout(false, 390), await checkLayout(true, 390), await checkLayout(false, 1280, true), await checkLayout(false, 390, true)];
+      if (process.env.BYR_TEST_SCREENSHOT_DIR) {
+        await command('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+        await evaluate(`document.getElementById('manual-board-details').open=false;document.getElementById('scope-presets-details').open=false;document.getElementById('start-index').closest('details').open=true;document.getElementById('index-coverage-details').open=true;state.expandedReplyGroups.clear();state.onlineDocuments=[{id:'thread:Talking:800',type:'thread',board:'Talking',gid:'800',title:'资料检索示例',content:'课程资料与经验分享。'.repeat(60),author:'alice'},...Array.from({length:5},(_,index)=>({id:'reply:Talking:800:'+index,type:'reply',board:'Talking',gid:'800',pos:index+1,content:'补充资料与使用经验。'.repeat(20),author:'bob'}))];state.onlineQuery='资料';document.getElementById('query-input').value='资料';document.getElementById('online-search-status-summary').textContent='所选范围扫描完成 · 已找到 6 条';renderResults();scrollTo(0,0);`);
+        const screenshot = await command('Page.captureScreenshot', { format: 'png' });
+        fs.writeFileSync(path.join(process.env.BYR_TEST_SCREENSHOT_DIR, 'compact-results-and-coverage.png'), Buffer.from(screenshot.result.data, 'base64'));
+      }
       // 使用真实 DOM 重现横幅与帖子共用 article 类，以及单页路由延迟替换正文。
       await command('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/jump#!article/StudyShare/7?byr_article_id=700&byr_highlight=' + encodeURIComponent('资料|teacher|C++') });
       const waitForHighlight = async (id) => {

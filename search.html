@@ -157,6 +157,7 @@
             <div class="index-coverage">
               <div class="index-coverage-heading"><strong>索引覆盖</strong><span id="index-coverage-summary">尚未建立索引</span></div>
               <details id="index-coverage-details" hidden><summary>查看版面覆盖</summary><div id="index-coverage-list"></div></details>
+              <div class="coverage-actions"><span>按当前读取范围判断 · 超过 24 小时提示过期</span><button id="fill-index-gaps" class="text-button" type="button" title="刷新主题列表，只补读缺失页面或已变化主题，保留已完成内容">只更新缺口</button></div>
             </div>
             <div class="inline-actions"><button id="retry-index" class="text-button" type="button" hidden>重试失败项</button><button id="new-index" class="text-button" type="button" hidden>重新更新</button></div>
           </div>
@@ -178,7 +179,7 @@
             <label class="field-label" for="request-delay">请求启动间隔（毫秒）<input id="request-delay" class="input-control" type="number" min="50" max="5000" step="50" value="50"></label>
           </div>
           <div class="performance-live-row"><span id="performance-live-status">当前空闲</span><span>修改后对后续任务立即生效</span></div>
-          <p class="field-help">“同时请求数”控制最多同时处理多少个请求；“请求启动间隔”控制所有请求之间至少等待多久。极速适合短时间在线搜索，大范围索引建议改用平衡或省资源。</p>
+          <p class="field-help">“同时请求数”控制最多同时处理多少个请求；“请求启动间隔”控制所有请求之间至少等待多久。超时、限流或服务器繁忙会最多自动重试 2 次，持续异常时临时降速，稳定后逐步恢复所选速度。</p>
         </div>
       </details>
 

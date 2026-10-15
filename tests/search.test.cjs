@@ -31,7 +31,8 @@ function page() {
   const model = fs.readFileSync(path.join(root, "forum-model.js"), "utf8");
   const client = fs.readFileSync(path.join(root, "forum-client.js"), "utf8");
   const source = fs.readFileSync(path.join(root, "search.js"), "utf8").replace(/init\(\)\.catch\([\s\S]*$/, "");
-  vm.runInContext(model + "\n" + client + "\n" + source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, queryGroups, parseSearchQuery, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument, boardPosts, forumThreadId, ForumClient };", context);
+  vm.runInContext(fs.readFileSync(path.join(root, "task-engine.js"), "utf8"), context);
+  vm.runInContext(model + "\n" + client + "\n" + source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, renderThreadGroup, queryGroups, parseSearchQuery, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument, boardPosts, forumThreadId, ForumClient, coverageStatus, rememberIndexedPages, enqueueIndexedPost, shouldReadIndexedPost };", context);
   return { context, api: context.api };
 }
 
@@ -194,6 +195,108 @@ test("论坛响应分类区分登录失效、主题失效和普通非 JSON", () 
   assert.equal(api.ForumClient.errorFromResponse({ status: 200, data: { success: false, code: "THREAD_NOT_FOUND", message: "主题不存在" } }).code, "THREAD_NOT_FOUND");
   assert.equal(api.ForumClient.errorFromResponse({ status: 200, data: { success: false, code: "NON_JSON_RESPONSE", message: "论坛返回了非 JSON 内容" } }).code, "NON_JSON_RESPONSE");
   assert.equal(api.ForumClient.nonJsonData("sys exception: \\\"\\\" in threads.php", { headers: { get: () => "text/html" } }).code, "THREAD_NOT_FOUND");
+});
+
+test("自动重试仅处理临时故障，并遵守服务器要求的等待时间", () => {
+  const { api } = page();
+  const client = api.ForumClient;
+  for (const status of [429, 408, 500, 502, 503, 504]) assert.ok(client.isRetryable(client.errorFromResponse({ status })));
+  for (const status of [401, 403, 404]) assert.equal(client.isRetryable(client.errorFromResponse({ status })), false);
+  assert.equal(client.isRetryable(client.errorFromResponse({ data: { code: "THREAD_NOT_FOUND" } })), false);
+  assert.equal(client.retryAfterMs("3"), 3000);
+  assert.equal(client.retryAfterMs("Thu, 15 Oct 2026 00:00:10 GMT", Date.parse("2026-10-15T00:00:00Z")), 10000);
+  const policy = client.createRequestPolicy();
+  const rateLimit = client.errorFromResponse({ status: 429, retryAfterMs: 6000 });
+  assert.equal(policy.failed(rateLimit, 0, 1000), 6000);
+  assert.equal(policy.limits(8, 50).cooldownUntil, 7000);
+  assert.equal(policy.limits(8, 50).concurrency, 4);
+  assert.equal(policy.limits(8, 50).delayMs, 250);
+  for (let count = 0; count < 12; count += 1) policy.succeeded(3000);
+  assert.equal(policy.limits(8, 50).concurrency, 4);
+  for (let count = 0; count < 12; count += 1) policy.succeeded(8000);
+  assert.equal(policy.limits(8, 50).concurrency, 8);
+  assert.equal(policy.limits(8, 50).delayMs, 50);
+  const transient = client.errorFromResponse({ status: 503 });
+  policy.failed(transient, 0, 9000);
+  assert.equal(policy.limits(8, 50).reduced, false);
+  policy.failed(transient, 1, 9100);
+  assert.equal(policy.limits(8, 50).reduced, true);
+  assert.equal(policy.limits(1, 2000).concurrency, 1);
+  assert.equal(policy.limits(1, 2000).delayMs, 2000);
+});
+
+test("请求最多重试两次，持久失败可交给原任务重试，登录失效不重试", async () => {
+  const { api, context } = page();
+  vm.runInContext("waitForRequestTurn = async () => {};", context);
+  let calls = 0;
+  context.chrome.runtime.sendMessage = async () => ++calls < 3 ? { ok: false, status: 503 } : { ok: true, data: { success: true, data: {} } };
+  const task = { requests: 0 };
+  assert.equal((await api.requestApi("/n/b/section.json", task)).success, true);
+  assert.equal(calls, 3);
+  assert.equal(task.requests, 3);
+  assert.equal(task.retries, 2);
+  calls = 0;
+  context.chrome.runtime.sendMessage = async () => { calls += 1; return { ok: false, status: 503 }; };
+  await assert.rejects(api.requestApi("/n/b/section.json", task), { code: "SERVER_BUSY" });
+  assert.equal(calls, 3);
+  calls = 0;
+  context.chrome.runtime.sendMessage = async () => { calls += 1; return { ok: false, status: 401 }; };
+  await assert.rejects(api.requestApi("/n/b/section.json", task), { code: "LOGIN_REQUIRED" });
+  assert.equal(calls, 1);
+});
+
+test("自动重试冷却期间暂停，不会再向论坛发送请求", async () => {
+  const { api, context } = page();
+  const task = { requests: 0, pauseRequested: false };
+  context.cancelTask = task;
+  vm.runInContext("sleep = async () => { cancelTask.pauseRequested = true; };", context);
+  let calls = 0;
+  context.chrome.runtime.sendMessage = async () => { calls += 1; return { ok: false, status: 503 }; };
+  await assert.rejects(api.requestApi("/n/b/section.json", task), { name: "AbortError" });
+  assert.equal(calls, 1);
+});
+
+test("覆盖状态按当前读取范围判断，过期、缺页和旧索引均不会误报完成", () => {
+  const { api } = page();
+  const now = Date.now();
+  const current = { ...options, timeRangeMode: "all" };
+  const record = { options: current, checkedAt: now, complete: true };
+  assert.equal(api.coverageStatus(null, current, false, now).label, "未建立索引");
+  assert.equal(api.coverageStatus(null, current, true, now).label, "部分索引");
+  assert.equal(api.coverageStatus(record, current, true, now).label, "已完成");
+  assert.equal(api.coverageStatus(record, { ...current, boardPageLimit: 3 }, true, now).label, "部分索引");
+  assert.equal(api.coverageStatus(record, { ...current, threadPageLimit: null }, true, now).label, "部分索引");
+  assert.equal(api.coverageStatus({ ...record, complete: false }, current, true, now).label, "部分索引");
+  assert.equal(api.coverageStatus(record, current, true, now + 86400000).label, "可能过期");
+  assert.equal(api.coverageStatus(record, { ...current, timeRange: { start: 1, end: 2 }, timeRangeMode: "custom" }, true, now).label, "部分索引");
+});
+
+test("末页成功不能掩盖前页失败，只更新缺口时复用已写入页且不计作新读取", async () => {
+  const { api } = page();
+  const tasks = engine();
+  const opts = { ...options, threadPageLimit: 3, timeRangeMode: "all", incremental: true, missingOnly: true };
+  const post = { gid: "900", title: "资料", replyCount: 28, time: 123 };
+  const task = tasks.create("index", [board], opts);
+  for (let page = 1; page <= 3; page += 1) tasks.enqueue(task, { kind: "article", board, post, page, totalPages: 3, targetPages: 3 });
+  task.jobs.forEach((job) => { job.status = job.page === 2 ? "failed" : "done"; });
+  api.rememberIndexedPages(task);
+  assert.equal(api.state.indexMetadata["Talking:900"].complete, false);
+  assert.deepEqual(Array.from(api.state.indexMetadata["Talking:900"].readPages), [1, 3]);
+  const next = tasks.create("index", [board], opts);
+  api.enqueueIndexedPost(next, board, post);
+  const pagesRead = [];
+  await tasks.run(next, async (job) => { pagesRead.push(job.page); job.totalPages = 3; job.targetPages = 3; }, () => 2, () => {}, new Set());
+  assert.deepEqual(pagesRead, [2]);
+  assert.equal(tasks.metrics(next).reusedPages, 2);
+  assert.equal(tasks.metrics(next).contentPages, 1);
+  api.rememberIndexedPages(next);
+  assert.equal(api.state.indexMetadata["Talking:900"].complete, true);
+  assert.equal(api.shouldReadIndexedPost(next, board, post), false);
+  const changed = tasks.create("index", [board], opts);
+  api.enqueueIndexedPost(changed, board, { ...post, replyCount: 29 });
+  assert.equal(changed.jobs.length, 1);
+  assert.equal(changed.jobs[0].status, "pending");
+  assert.equal(changed.jobs[0].reused, undefined);
 });
 
 test("主题标题和版面上下文不能冒充回帖自身命中，正文与作者仍可查询", () => {

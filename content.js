@@ -59,8 +59,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const text = message.responseType === "text-gbk"
         ? new TextDecoder("gbk").decode(buffer)
         : new TextDecoder("utf-8").decode(buffer);
+      const retryAfterMs = globalThis.ByrForumClient?.retryAfterMs(response.headers.get("retry-after")) || 0;
       if (message.responseType === "text-gbk") {
-        sendResponse({ ok: response.ok, status: response.status, text });
+        sendResponse({ ok: response.ok, status: response.status, retryAfterMs, text });
         return;
       }
       let data = null;
@@ -73,9 +74,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           message: "论坛返回了非 JSON 内容"
         };
       }
-      sendResponse({ ok: response.ok, status: response.status, data });
+      sendResponse({ ok: response.ok, status: response.status, retryAfterMs, data });
     })
-    .catch((error) => sendResponse({ ok: false, status: 0, error: error.name === "AbortError" ? "请求超时" : error.message }))
+    .catch((error) => sendResponse({ ok: false, status: 0, code: error.name === "AbortError" ? "REQUEST_TIMEOUT" : "NETWORK_ERROR", error: error.name === "AbortError" ? "请求超时" : error.message }))
     .finally(() => window.clearTimeout(timeout));
 
   return true;

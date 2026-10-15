@@ -53,12 +53,17 @@ globalThis.ByrTasks = (() => {
     let nativePages = 0;
     let contentPages = 0;
     let skipped = 0;
+    let reusedPages = 0;
     let done = 0;
     task.jobs.forEach((job) => {
       boardStates.set(job.board.name, (boardStates.get(job.board.name) ?? true) && job.status === "done");
       if (job.status === "failed") failures.push(job);
       if (job.status !== "done") return;
       done += 1;
+      if (job.reused) {
+        reusedPages += 1;
+        return;
+      }
       if (job.skipped) {
         skipped += 1;
         return;
@@ -68,7 +73,7 @@ globalThis.ByrTasks = (() => {
       if (job.kind === "article") { contentPages += 1; threads.add(`${job.board.name}:${job.post.gid}`); }
     });
     const boards = task.boards.filter((board) => boardStates.get(board.name) === true).length;
-    return { boards, boardTotal: task.boards.length, boardPages, nativePages, contentPages, threads: threads.size, skipped, failures, done, total: task.jobs.length };
+    return { boards, boardTotal: task.boards.length, boardPages, nativePages, contentPages, threads: threads.size, skipped, reusedPages, failures, done, total: task.jobs.length };
   }
 
   function run(task, worker, concurrency, notify, schedulers) {

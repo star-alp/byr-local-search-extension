@@ -23,6 +23,8 @@ const SCOPE_PRESETS_STORAGE_KEY = "byr-search-scope-presets";
 const SEARCH_HISTORY_STORAGE_KEY = "byr-search-history";
 const SEARCH_SESSIONS_MAX = 20;
 const INDEX_METADATA_STORAGE_KEY = "byr-search-index-metadata";
+const INDEX_COVERAGE_STORAGE_KEY = "byr-search-index-coverage";
+const INDEX_COVERAGE_FRESH_MS = 24 * 60 * 60 * 1000;
 const RECOMMENDED_BOARD_NAMES = [
   "AimGraduate", "GraduateSch", "SICE", "StudyShare", "Talking", "Fujian",
   "SCS", "SCSS", "Paper", "JobInfo", "BBShelp"
@@ -80,6 +82,9 @@ const state = {
   searchHistory: [],
   searchSessions: [],
   indexMetadata: {},
+  indexCoverage: {},
+  requestPolicy: ForumClient.createRequestPolicy(),
+  expandedReplyGroups: new Set(),
   requestCount: 0,
   restoredOnlineTaskId: "",
   settingsBackgroundTargets: [],
@@ -151,6 +156,11 @@ function loadIndexMetadata() {
   } catch (_error) {
     state.indexMetadata = {};
   }
+  try {
+    state.indexCoverage = JSON.parse(localStorage.getItem(INDEX_COVERAGE_STORAGE_KEY) || "{}") || {};
+  } catch (_error) {
+    state.indexCoverage = {};
+  }
 }
 
 function saveIndexMetadata() {
@@ -175,27 +185,75 @@ function indexTimeRangeKey(range, mode = "") {
   return `${mode || "custom"}:${range.start}:${range.end}`;
 }
 
+function indexedPostUnchanged(metadata, task, post) {
+  return metadata
+    && String(metadata.replyCount ?? "") === String(postReplyCount(post) ?? "")
+    && String(metadata.postTime ?? "") === String(postUpdatedTime(post) ?? "")
+    && String(metadata.title ?? "") === String(post.title ?? "")
+    && metadata.timeRangeKey === indexTimeRangeKey(task.options.timeRange, task.options.timeRangeMode);
+}
+
 function shouldReadIndexedPost(task, board, post) {
   if (task.mode !== "index" || task.options.incremental === false) return true;
   const metadata = state.indexMetadata[indexedPostKey(board, post)];
-  if (!metadata || !state.documents.some((doc) => doc.board === board.name && String(doc.gid) === String(post.gid))) return true;
-  return String(metadata.replyCount ?? "") !== String(postReplyCount(post) ?? "")
-    || String(metadata.postTime ?? "") !== String(postUpdatedTime(post) ?? "")
-    || String(metadata.title ?? "") !== String(post.title ?? "")
-    || metadata.threadPageLimit !== task.options.threadPageLimit
-    || metadata.timeRangeKey !== indexTimeRangeKey(task.options.timeRange, task.options.timeRangeMode);
+  if (!indexedPostUnchanged(metadata, task, post) || !metadata.complete) return true;
+  const target = Math.min(task.options.threadPageLimit ?? Infinity, metadata.totalPages || Infinity);
+  return !Number.isFinite(target) || !Array.from({ length: target }, (_, index) => index + 1).every((page) => metadata.readPages?.includes(page));
 }
 
-function rememberIndexedPost(task, board, post) {
-  state.indexMetadata[indexedPostKey(board, post)] = {
-    replyCount: postReplyCount(post),
-    postTime: postUpdatedTime(post),
-    title: post.title || "",
-    threadPageLimit: task.options.threadPageLimit,
-    timeRangeKey: indexTimeRangeKey(task.options.timeRange, task.options.timeRangeMode),
-    checkedAt: Date.now()
-  };
-  saveIndexMetadata();
+function enqueueIndexedPost(task, board, post) {
+  if (!shouldReadIndexedPost(task, board, post)) {
+    task.incrementalSkipped = (task.incrementalSkipped || 0) + 1;
+    return;
+  }
+  const metadata = state.indexMetadata[indexedPostKey(board, post)];
+  // 只补缺口时复用已成功写入的页；主题发生变化后，旧页必须重新检查。
+  if (task.options.missingOnly && indexedPostUnchanged(metadata, task, post) && metadata.totalPages && metadata.readPages?.length) {
+    const target = Math.min(task.options.threadPageLimit ?? Infinity, metadata.totalPages);
+    for (let page = 1; page <= target; page += 1) {
+      ByrTasks.enqueue(task, { kind: "article", board, post, page });
+      const job = task.jobs.find((item) => item.kind === "article" && item.board.name === board.name && String(item.post.gid) === String(post.gid) && item.page === page);
+      if (metadata.readPages.includes(page) && job.status === "pending") {
+        Object.assign(job, { status: "done", reused: true, targetPages: target, totalPages: metadata.totalPages });
+      }
+    }
+  } else enqueuePage(task, "article", board, 1, post);
+}
+
+function rememberIndexedPages(task) {
+  const topics = new Map();
+  task.jobs.filter((job) => job.kind === "article").forEach((job) => {
+    const key = indexedPostKey(job.board, job.post);
+    if (!topics.has(key)) topics.set(key, []);
+    topics.get(key).push(job);
+  });
+  let changed = false;
+  topics.forEach((jobs, key) => {
+    const successful = jobs.filter((job) => job.status === "done" && !job.skipped);
+    if (!successful.length) return;
+    const post = jobs[0].post;
+    const readPages = successful.map((job) => job.page).sort((a, b) => a - b);
+    const totalPages = Math.max(...successful.map((job) => job.totalPages || 0));
+    const target = Math.min(task.options.threadPageLimit ?? Infinity, totalPages || Infinity);
+    const previous = state.indexMetadata[key];
+    if (indexedPostUnchanged(previous, task, post) && previous.threadPageLimit === task.options.threadPageLimit
+        && previous.totalPages === totalPages && JSON.stringify(previous.readPages) === JSON.stringify(readPages)) return;
+    state.indexMetadata[key] = {
+      replyCount: postReplyCount(post), postTime: postUpdatedTime(post), title: post.title || "",
+      threadPageLimit: task.options.threadPageLimit,
+      timeRangeKey: indexTimeRangeKey(task.options.timeRange, task.options.timeRangeMode),
+      readPages, totalPages,
+      complete: Number.isFinite(target) && readPages.length === target && readPages.every((page, index) => page === index + 1),
+      checkedAt: Date.now()
+    };
+    changed = true;
+  });
+  if (changed) {
+    try { saveIndexMetadata(); } catch (error) {
+      task.pauseRequested = true;
+      task.error = `索引进度保存失败，请检查浏览器存储：${error.message}`;
+    }
+  }
 }
 
 function applyIndexOptionValues(options) {
@@ -642,11 +700,15 @@ async function waitForRequestTurn(task) {
   await previousGate;
   try {
     checkTaskCancelled(task);
-    let remaining = state.lastRequestStartedAt + state.requestDelayMs - Date.now();
+    const nextStart = () => {
+      const limits = state.requestPolicy.limits(state.requestConcurrency, state.requestDelayMs);
+      return Math.max(state.lastRequestStartedAt + limits.delayMs, limits.cooldownUntil);
+    };
+    let remaining = nextStart() - Date.now();
     while (remaining > 0) {
       await sleep(Math.min(remaining, 100));
       checkTaskCancelled(task);
-      remaining = state.lastRequestStartedAt + state.requestDelayMs - Date.now();
+      remaining = nextStart() - Date.now();
     }
     state.lastRequestStartedAt = Date.now();
   } finally {
@@ -658,6 +720,9 @@ function updatePerformanceLiveStatus() {
   let label = "当前空闲";
   if (state.onlineSearchRunning) label = `在线搜索 · ${state.onlineActiveWorkers} 个活跃任务`;
   else if (state.indexRunning) label = `更新索引 · ${state.indexActiveWorkers} 个活跃任务`;
+  const limits = state.requestPolicy.limits(state.requestConcurrency, state.requestDelayMs);
+  if (limits.reduced) label += ` · 临时降速：同时 ${limits.concurrency} 个，每 ${limits.delayMs} 毫秒启动`;
+  if (limits.cooldownUntil > Date.now()) label += " · 等待自动重试";
   $("#performance-live-status").textContent = label;
 }
 
@@ -756,6 +821,31 @@ async function refreshResourceUsage() {
   renderIndexCoverage();
 }
 
+function boardTaskCoverage(task, name) {
+  if (task?.mode !== "index" || !task.boards.some((board) => board.name === name)) return null;
+  const jobs = task.jobs.filter((job) => job.board.name === name);
+  const pages = jobs.filter((job) => job.kind === "board" && job.status === "done").length;
+  return {
+    options: task.options,
+    complete: pages > 0 && jobs.every((job) => job.status === "done"),
+    boardPages: pages,
+    contentPages: jobs.filter((job) => job.kind === "article" && job.status === "done" && !job.skipped).length,
+    checkedAt: task.updatedAt || Number(task.id) || 0
+  };
+}
+
+function coverageStatus(record, options, hasDocuments, now = Date.now()) {
+  if (!record) return { label: hasDocuments ? "部分索引" : "未建立索引", kind: "partial", hint: "尚无当前读取范围的完整扫描记录" };
+  const coversPages = (saved, current) => saved === null || (current !== null && saved >= current);
+  const stored = record.options;
+  const sameRange = stored && indexTimeRangeKey(stored.timeRange, stored.timeRangeMode) === indexTimeRangeKey(options.timeRange, options.timeRangeMode);
+  if (!record.complete || !sameRange || !coversPages(stored.boardPageLimit, options.boardPageLimit) || !coversPages(stored.threadPageLimit, options.threadPageLimit)) {
+    return { label: "部分索引", kind: "partial", hint: "当前页数或日期范围尚未全部读取，可只更新缺口" };
+  }
+  if (now - record.checkedAt >= INDEX_COVERAGE_FRESH_MS) return { label: "可能过期", kind: "stale", hint: "距离上次完整检查已超过 24 小时，论坛内容可能有变化" };
+  return { label: "已完成", kind: "complete", hint: "当前读取范围已完成，不代表版面全部历史内容" };
+}
+
 function renderIndexCoverage() {
   const byBoard = new Map();
   const ensure = (name, description = name) => {
@@ -778,15 +868,26 @@ function renderIndexCoverage() {
     const item = ensure(boardName);
     item.lastCheckedAt = Math.max(item.lastCheckedAt, Number(metadata?.checkedAt) || 0);
   });
-  const rows = [...byBoard.values()].filter((item) => item.documents || item.lastCheckedAt).sort((a, b) => b.documents - a.documents || b.lastCheckedAt - a.lastCheckedAt);
+  Object.entries(state.indexCoverage).forEach(([name, record]) => {
+    ensure(name).lastCheckedAt = Math.max(ensure(name).lastCheckedAt, Number(record.checkedAt) || 0);
+  });
+  let options;
+  try { options = readIndexOptions(); } catch (_error) { options = null; }
+  const rows = [...byBoard.values()].filter((item) => item.documents || item.lastCheckedAt || state.selectedBoardNames.has(item.name))
+    .sort((a, b) => Number(state.selectedBoardNames.has(b.name)) - Number(state.selectedBoardNames.has(a.name)) || b.documents - a.documents);
+  rows.forEach((item) => {
+    const live = boardTaskCoverage(state.tasks.index, item.name);
+    const record = live && (!state.indexCoverage[item.name] || live.checkedAt >= state.indexCoverage[item.name].checkedAt) ? live : state.indexCoverage[item.name];
+    item.status = options ? coverageStatus(record, options, item.documents > 0) : { label: "范围无效", kind: "partial", hint: "请检查读取页数和日期设置" };
+  });
   const totalTopics = new Set(state.documents.filter((doc) => doc.gid).map((doc) => `${doc.board}:${doc.gid}`)).size;
   const latest = rows.reduce((value, item) => Math.max(value, item.lastCheckedAt), 0);
-  $("#index-coverage-summary").textContent = state.documents.length
-    ? `${totalTopics} 个主题 · ${state.documents.length} 条内容 · ${rows.length} 个版面${latest ? ` · 最近 ${formatTime(latest)}` : ""}`
-    : "尚未建立索引";
+  const completed = rows.filter((item) => state.selectedBoardNames.has(item.name) && item.status.kind === "complete").length;
+  $("#index-coverage-summary").textContent = `${state.documents.length} 条内容 · 当前范围 ${completed}/${state.selectedBoardNames.size} 版面完成`;
+  $("#index-coverage-summary").title = `${totalTopics} 个主题${latest ? ` · 最近 ${formatTime(latest)}` : ""}；状态按当前页数和日期范围判断`;
   $("#index-coverage-details").hidden = !rows.length;
   $("#index-coverage-list").innerHTML = rows.map((item) =>
-    `<div class="index-coverage-row"><span title="${escapeHtml(item.name)}">${escapeHtml(item.description || item.name)}</span><span>${item.topics.size} 主题 · ${item.replies} 回帖${item.lastCheckedAt ? ` · ${escapeHtml(formatTime(item.lastCheckedAt))}` : ""}</span></div>`
+    `<div class="index-coverage-row"><span title="${escapeHtml(item.name)}">${escapeHtml(item.description || item.name)}</span><span>${item.topics.size} 主题 · ${item.replies} 回帖</span><span class="coverage-badge is-${item.status.kind}" title="${escapeHtml(item.status.hint)}${item.lastCheckedAt ? `；最近检查 ${escapeHtml(formatTime(item.lastCheckedAt))}` : ""}">${item.status.label}</span></div>`
   ).join("");
 }
 
@@ -795,7 +896,7 @@ function scheduleIndexCoverageRender() {
   state.coverageRenderTimer = window.setTimeout(() => {
     state.coverageRenderTimer = null;
     renderIndexCoverage();
-  }, 180);
+  }, 500);
 }
 
 function setIndexStatus(message, progress = null) {
@@ -956,40 +1057,39 @@ function boardUrl(name) {
   return `https://bbs.byr.cn/#!board/${encodeURIComponent(name)}`;
 }
 
-async function requestApi(path, task) {
-  await waitForRequestTurn(task);
-  state.requestCount += 1;
-  if (task) task.requests += 1;
-  $("#resource-requests").textContent = `${state.requestCount} 次`;
-  const response = await chrome.runtime.sendMessage({
-    type: "api-via-page",
-    sourceTabId: state.sourceTabId,
-    path
-  });
-  if (Number.isInteger(response?.sourceTabId)) state.sourceTabId = response.sourceTabId;
-  if (!response?.ok || !response.data?.success) {
-    throw ForumClient.errorFromResponse(response);
+async function requestForum(path, task, textMode = false) {
+  for (let attempt = 0; ; attempt += 1) {
+    await waitForRequestTurn(task);
+    state.requestCount += 1;
+    if (task) task.requests += 1;
+    $("#resource-requests").textContent = `${state.requestCount} 次`;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "api-via-page", sourceTabId: state.sourceTabId, path });
+      if (Number.isInteger(response?.sourceTabId)) state.sourceTabId = response.sourceTabId;
+      if (!response?.ok || (!textMode && !response.data?.success)) throw ForumClient.errorFromResponse(response);
+      const text = String(response?.text || "");
+      if (textMode && (text.includes("您未登录") || text.includes("请登录后继续操作"))) {
+        throw ForumClient.errorFromResponse({ status: 401 });
+      }
+      state.requestPolicy.succeeded();
+      updatePerformanceLiveStatus();
+      return textMode ? text : response.data;
+    } catch (error) {
+      if (!ForumClient.isRetryable(error)) throw error;
+      state.requestPolicy.failed(error, attempt);
+      updatePerformanceLiveStatus();
+      if (attempt >= 2) throw error;
+      if (task) task.retries = (task.retries || 0) + 1;
+    }
   }
-  return response.data;
 }
 
-async function requestForumText(path, task) {
-  await waitForRequestTurn(task);
-  state.requestCount += 1;
-  if (task) task.requests += 1;
-  $("#resource-requests").textContent = `${state.requestCount} 次`;
-  const response = await chrome.runtime.sendMessage({
-    type: "api-via-page",
-    sourceTabId: state.sourceTabId,
-    path
-  });
-  if (Number.isInteger(response?.sourceTabId)) state.sourceTabId = response.sourceTabId;
-  const text = String(response?.text || "");
-  if (!response?.ok) throw ForumClient.errorFromResponse(response, "论坛原生搜索请求失败");
-  if (text.includes("您未登录") || text.includes("请登录后继续操作")) {
-    throw ForumClient.errorFromResponse({ status: response.status, data: { success: false, code: "LOGIN_REQUIRED", message: "论坛登录已失效" } });
-  }
-  return text;
+function requestApi(path, task) {
+  return requestForum(path, task);
+}
+
+function requestForumText(path, task) {
+  return requestForum(path, task, true);
 }
 
 function flattenBoards(nodes, output = []) {
@@ -1141,6 +1241,7 @@ function updateBoardSelectionStatus() {
     : "尚未读取版面";
   updateIndexButtonState();
   updateOnlineSearchControls();
+  scheduleIndexCoverageRender();
   if (state.searchMode === "local") renderResults();
 }
 
@@ -1374,6 +1475,7 @@ function updateIndexRangeSummary() {
   $("#index-range-summary").textContent = `${boardPages} · ${threadPages} · ${timeLabel}`;
   saveIndexOptions();
   updateOnlineSearchControls();
+  scheduleIndexCoverageRender();
   if (state.searchMode === "local") renderResults();
 }
 
@@ -1430,6 +1532,7 @@ function readIndexOptions(values = indexOptionValues()) {
   return {
     boardPageLimit: readPages(values.boardPages, values.boardAll),
     threadPageLimit: readPages(values.threadPages, values.threadAll),
+    incremental: values.incremental !== false,
     timeRange: readIndexTimeRange(values),
     timeRangeMode: values.timeRange
   };
@@ -1680,6 +1783,7 @@ function updateOnlineSearchControls() {
   $("#new-index").hidden = state.indexRunning || state.tasks.index?.phase !== "paused";
   $("#new-index").disabled = running;
   $("#full-index").disabled = state.indexRunning || state.onlineSearchRunning || state.boardListLoading || !state.selectedBoardNames.size;
+  $("#fill-index-gaps").disabled = state.indexRunning || state.onlineSearchRunning || state.boardListLoading || !state.selectedBoardNames.size;
   $("#pause-index").disabled = !state.indexRunning || Boolean(state.tasks.index?.pauseRequested);
   $("#pause-index").textContent = state.tasks.index?.pauseRequested && state.indexRunning ? "暂停中" : "暂停";
   updateIndexButtonState();
@@ -1687,6 +1791,7 @@ function updateOnlineSearchControls() {
 }
 
 function updateTaskStatus(task, active = 0) {
+  if (task.mode === "index") rememberIndexedPages(task);
   const metrics = ByrTasks.metrics(task);
   const labels = { running: task.pauseRequested ? "正在暂停" : "正在读取与搜索", paused: "已暂停，可继续", partial: "部分完成", complete: "所选范围扫描完成" };
   const phaseLabel = task.mode === "online" && state.restoredOnlineTaskId === task.id && !state.onlineSearchRunning
@@ -1696,6 +1801,8 @@ function updateTaskStatus(task, active = 0) {
     + (task.mode === "online" ? ` · 原生搜索 ${metrics.nativePages} 页` : "")
     + (task.mode === "online" ? ` · 命中 ${state.onlineDocuments.length} 条` : "")
     + (task.mode === "index" && task.incrementalSkipped ? ` · 跳过 ${task.incrementalSkipped} 个未变化主题` : "")
+    + (metrics.reusedPages ? ` · 复用 ${metrics.reusedPages} 个已索引页` : "")
+    + (task.retries ? ` · 自动重试 ${task.retries} 次` : "")
     + (metrics.skipped ? ` · 跳过 ${metrics.skipped} 个失效主题` : "")
     + (task.cachePages ? ` · 复用 ${task.cachePages} 个内容页（${formatTime(task.cacheOldestAt)} 获取）` : "")
     + (metrics.failures.length ? ` · 失败 ${metrics.failures.length} 项` : "")
@@ -1915,11 +2022,13 @@ async function executeTaskJob(task, job) {
   const total = Math.max(1, Number(result.data?.pagination?.total) || 1);
   const limit = job.kind === "board" ? task.options.boardPageLimit : task.options.threadPageLimit;
   const pageLimit = limit === null ? total : Math.min(total, limit);
+  job.targetPages = pageLimit;
+  job.totalPages = total;
   if (page < pageLimit) enqueuePage(task, job.kind, board, page + 1, post);
   if (job.kind === "board") {
     boardPosts(result.data).forEach((item) => {
-      if (shouldReadIndexedPost(task, board, item)) enqueuePage(task, "article", board, 1, item);
-      else task.incrementalSkipped = (task.incrementalSkipped || 0) + 1;
+      if (task.mode === "index") enqueueIndexedPost(task, board, item);
+      else enqueuePage(task, "article", board, 1, item);
     });
     return;
   }
@@ -1940,7 +2049,6 @@ async function executeTaskJob(task, job) {
       if (index < 0) state.documents.push(doc);
       else state.documents[index] = mergeDocument(state.documents[index], doc);
     });
-    if (page >= pageLimit) rememberIndexedPost(task, board, post);
     scheduleOnlineRender();
   }
 }
@@ -1959,8 +2067,8 @@ async function runTask(task) {
   }
   try {
     await persistTasks();
-    await ByrTasks.run(task, (job) => executeTaskJob(task, job), () => state.requestConcurrency,
-      (active) => { updateTaskStatus(task, active); queueCheckpoint(); }, state.queueSchedulers);
+    await ByrTasks.run(task, (job) => executeTaskJob(task, job), () => state.requestPolicy.limits(state.requestConcurrency, state.requestDelayMs).concurrency,
+      (active) => { task.updatedAt = Date.now(); updateTaskStatus(task, active); queueCheckpoint(); }, state.queueSchedulers);
     if (task.mode === "online" && task.phase === "complete") {
       // 预览的旧目录可能已变化；完成后只保留本次实际扫描确认过的内容。
       state.onlineDocuments = state.onlineDocuments.filter((doc) => !doc.cachePreview);
@@ -1976,6 +2084,11 @@ async function runTask(task) {
     state.indexRunning = false;
     state.onlineActiveWorkers = 0;
     state.indexActiveWorkers = 0;
+    if (task.mode === "index") {
+      task.boards.forEach((board) => { state.indexCoverage[board.name] = boardTaskCoverage(task, board.name); });
+      try { localStorage.setItem(INDEX_COVERAGE_STORAGE_KEY, JSON.stringify(state.indexCoverage)); }
+      catch (error) { showToast(`索引内容已保留，覆盖状态保存失败：${error.message}`); }
+    }
     updateTaskStatus(task);
     renderResults();
     await refreshResourceUsage();
@@ -2006,6 +2119,7 @@ async function startNewTask(mode, fresh = false, overrides = {}) {
     });
     state.tasks[mode] = task;
     if (mode === "online") {
+      state.expandedReplyGroups.clear();
       state.onlineDocuments = [];
       state.onlineDocumentMap.clear();
       state.onlineQuery = query;
@@ -2053,6 +2167,10 @@ function startIndex() {
 
 function startFullIndex() {
   return startNewTask("index", false, { incremental: false });
+}
+
+function startMissingIndex() {
+  return startNewTask("index", false, { incremental: true, missingOnly: true });
 }
 
 function pauseIndex() {
@@ -2149,6 +2267,7 @@ function groupDocumentResults(results) {
       .map(parseForumTime).filter((value) => value !== null).sort((a, b) => b - a)[0] || null;
     return {
       resultType: "thread-group",
+      key: group.key,
       documentData: parentResult.documentData,
       parentResult,
       replies: group.replies.sort(compareResults),
@@ -2255,7 +2374,7 @@ function renderDocumentResult(result) {
 function renderMatchedReply(result) {
   const { documentData, terms } = result;
   return `<a class="result-child" href="${escapeHtml(threadUrl(documentData, terms))}" target="_blank" rel="noreferrer">
-    <div class="result-child-meta"><span class="result-kind">回帖</span><span>${highlight(documentData.author || "已注销", terms)}</span><span>第 ${escapeHtml(documentData.pos || 0)} 楼</span><span>${escapeHtml(formatTime(documentData.time))}</span><span>命中：回帖</span><span class="result-link-hint">跳到此楼 ↗</span></div>
+    <div class="result-child-meta"><span class="result-kind">第 ${escapeHtml(documentData.pos || 0)} 楼</span><span>${highlight(documentData.author || "已注销", terms)}</span><span>${escapeHtml(formatTime(documentData.time))}</span><span class="result-link-hint">跳到此楼 ↗</span></div>
     ${documentData.content ? `<p class="result-snippet">${highlight(getSnippet(documentData.content, terms), terms)}</p>` : ""}
   </a>`;
 }
@@ -2271,14 +2390,13 @@ function renderThreadGroup(group) {
   const matchedParts = [matched, replies.length ? "回帖" : ""].filter(Boolean);
   const matchSummary = matchedParts.length ? `命中：${matchedParts.join("、")}` : "";
   const childHtml = visible.map(renderMatchedReply).join("")
-    + (extra.length ? `<details class="result-child-more"><summary>还有 ${extra.length} 条回帖命中</summary>${extra.map(renderMatchedReply).join("")}</details>` : "");
+    + (extra.length ? `<details class="result-child-more" data-reply-group="${escapeHtml(group.key)}"${state.expandedReplyGroups.has(group.key) ? " open" : ""}><summary>还有 ${extra.length} 条回帖命中</summary>${extra.map(renderMatchedReply).join("")}</details>` : "");
   return `<article class="result-card result-group">
     <a class="result-group-main" href="${escapeHtml(threadUrl(documentData, parent.terms || []))}" target="_blank" rel="noreferrer">
     <h3 class="result-title">${highlight(documentData.title || "无标题", parent.terms || [])}</h3>
-    <div class="result-meta"><span class="result-kind">帖子</span><span>${escapeHtml(documentData.boardDescription || documentData.board)}</span>${documentData.author ? `<span>${escapeHtml(documentData.author)}</span>` : ""}<span>${escapeHtml(formatTime(documentData.time))}</span><span>${escapeHtml(matchSummary)}</span>${documentData.nativeSearch ? '<span class="result-source">论坛快速匹配</span>' : ""}</div>
+    <div class="result-meta"><span class="result-kind">帖子</span><span>${escapeHtml(documentData.boardDescription || documentData.board)}</span>${documentData.author ? `<span>${escapeHtml(documentData.author)}</span>` : ""}<span>${escapeHtml(formatTime(documentData.time))}</span><span>${escapeHtml(matchSummary)}${replies.length ? `（${replies.length} 条）` : ""}</span>${documentData.nativeSearch ? '<span class="result-source">论坛快速匹配</span>' : ""}<span class="result-link-hint">打开原文 ↗</span></div>
     ${state.searchMode === "online" && documentData.cachedAt ? `<p class="field-help">${documentData.cachePreview ? "缓存预览" : "缓存内容"} · ${escapeHtml(formatTime(documentData.cachedAt))} 获取</p>` : ""}
     ${documentData.content ? `<p class="result-snippet">${highlight(getSnippet(documentData.content, parent.terms || []), parent.terms || [])}</p>` : ""}
-    <span class="result-link-hint">打开原文 ↗</span>
     </a>
     ${replies.length ? `<div class="result-children">${childHtml}</div>` : ""}
   </article>`;
@@ -2405,6 +2523,12 @@ async function clearIndex() {
   if (!window.confirm("确定清空当前浏览器中的本地索引吗？")) return;
   await clearStore("documents");
   state.documents = [];
+  state.indexMetadata = {};
+  state.indexCoverage = {};
+  state.tasks.index = null;
+  await withStore("tasks", "readwrite", (store) => store.delete("index"));
+  saveIndexMetadata();
+  localStorage.setItem(INDEX_COVERAGE_STORAGE_KEY, "{}");
   setIndexStatus("本地索引已清空", 0);
   renderResults();
   await refreshResourceUsage();
@@ -2413,6 +2537,12 @@ async function clearIndex() {
 }
 
 function bindEvents() {
+  $("#result-list").addEventListener("toggle", (event) => {
+    const details = event.target;
+    if (!details.isConnected || !details.matches("details[data-reply-group]")) return;
+    if (details.open) state.expandedReplyGroups.add(details.dataset.replyGroup);
+    else state.expandedReplyGroups.delete(details.dataset.replyGroup);
+  }, true);
   $("#fresh-online").addEventListener("click", () => startNewTask("online", true));
   $("#open-settings").addEventListener("click", () => setSettingsOpen(true));
   $("#close-settings").addEventListener("click", () => setSettingsOpen(false));
@@ -2435,6 +2565,7 @@ function bindEvents() {
   $("#retry-index").addEventListener("click", () => continueTask("index", true));
   $("#new-index").addEventListener("click", () => startNewTask("index"));
   $("#full-index").addEventListener("click", startFullIndex);
+  $("#fill-index-gaps").addEventListener("click", startMissingIndex);
   $("#refresh-boards").addEventListener("click", () => loadBoards(true).catch((error) => showToast(error.message)));
   $("#select-all-boards").addEventListener("click", () => {
     setBoardSelection(state.boards.map((board) => board.name));
