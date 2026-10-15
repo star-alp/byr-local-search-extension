@@ -29,7 +29,7 @@ function page() {
     chrome: { runtime: { async sendMessage() { throw new Error("不应发出请求"); } } }
   });
   const source = fs.readFileSync(path.join(root, "search.js"), "utf8").replace(/init\(\)\.catch\([\s\S]*$/, "");
-  vm.runInContext(source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, queryGroups, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument };", context);
+  vm.runInContext(source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, queryGroups, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument, boardPosts, forumThreadId };", context);
   return { context, api: context.api };
 }
 
@@ -169,6 +169,21 @@ test("任务去重和覆盖统计使用真实成功状态，不把失败版面�
   assert.equal(tasks.metrics(task).boards, 0);
   assert.equal(tasks.metrics(task).boardPages, 1);
   assert.equal(tasks.metrics(task).failures.length, 1);
+});
+
+test("版面主题优先使用论坛提供的主题 id，失效主题不计入正文统计", () => {
+  const { api } = page();
+  const posts = api.boardPosts({ article: [{ id: "3320816728", group_id: "过期编号", title: "主题" }] });
+  assert.equal(posts[0].gid, "3320816728");
+  const tasks = engine();
+  const task = tasks.create("index", [board], options);
+  tasks.enqueue(task, { kind: "article", board, post: { gid: "3320816728" }, page: 1 });
+  task.jobs[0].status = "done";
+  task.jobs[0].skipped = true;
+  const metrics = tasks.metrics(task);
+  assert.equal(metrics.skipped, 1);
+  assert.equal(metrics.contentPages, 0);
+  assert.equal(metrics.threads, 0);
 });
 
 test("主题标题和版面上下文不能冒充回帖自身命中，正文与作者仍可查询", () => {

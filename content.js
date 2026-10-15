@@ -67,7 +67,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         data = text ? JSON.parse(text) : null;
       } catch (_error) {
-        data = { success: false, message: "论坛返回了非 JSON 内容" };
+        const preview = text.trim().replace(/\s+/gu, " ").slice(0, 240);
+        const invalidThread = /sys exception:[\s\S]*threads\.php|指定的文章不存在|文章不存在|链接错误/iu.test(text);
+        data = {
+          success: false,
+          code: invalidThread ? "THREAD_NOT_FOUND" : "NON_JSON_RESPONSE",
+          message: invalidThread ? "主题不存在或主题数据无效" : "论坛返回了非 JSON 内容",
+          contentType: response.headers.get("content-type") || "",
+          preview
+        };
       }
       sendResponse({ ok: response.ok, status: response.status, data });
     })

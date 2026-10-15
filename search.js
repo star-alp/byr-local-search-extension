@@ -718,10 +718,17 @@ async function requestApi(path, task) {
   });
   if (Number.isInteger(response?.sourceTabId)) state.sourceTabId = response.sourceTabId;
   if (!response?.ok || !response.data?.success) {
-    if (response?.status === 401 || response?.data?.message?.includes("登录")) {
+    const forumMessage = String(response?.data?.message || response?.error || "");
+    if (response?.status === 401 || forumMessage.includes("登录")) {
       throw new Error("论坛登录已失效，请先在论坛页面重新登录");
     }
-    throw new Error(response?.data?.message || response?.error || "论坛请求失败");
+    const invalidThread = /指定的文章不存在|文章不存在|链接错误/iu.test(forumMessage);
+    const error = new Error(forumMessage || "论坛请求失败");
+    error.code = response?.data?.code || (invalidThread ? "THREAD_NOT_FOUND" : "FORUM_REQUEST_FAILED");
+    error.preview = response?.data?.preview || "";
+    error.contentType = response?.data?.contentType || "";
+    error.status = response?.status || 0;
+    throw error;
   }
   return response.data;
 }
@@ -1133,7 +1140,7 @@ function updateIndexRangeSummary() {
 
 function boardPosts(data) {
   const posts = [...(data?.posts || []), ...(data?.topPosts || []), ...(data?.article || [])]
-    .map((post) => ({ ...post, gid: String(post?.gid ?? post?.group_id ?? post?.id ?? "") }));
+    .map((post) => ({ ...post, gid: forumThreadId(post) }));
   const seen = new Set();
   return posts.filter((post) => {
     const id = String(post?.gid || "");
@@ -1141,6 +1148,12 @@ function boardPosts(data) {
     seen.add(id);
     return true;
   });
+}
+
+function forumThreadId(post) {
+  return [post?.gid, post?.id, post?.group_id]
+    .map((value) => String(value ?? "").trim())
+    .find(Boolean) || "";
 }
 
 function parseForumTime(value) {
@@ -1197,7 +1210,7 @@ function buildForumDocument(board, boardDescription, post, result, article) {
   const author = articleUser?.id || articleUser || postUser?.id || postUser || "已注销";
   const authorName = articleUser?.user_name || articleUser?.username || "";
   const articleId = String(article.id ?? article.ID ?? article.article_id ?? "").trim();
-  const gid = String(post.gid ?? post.group_id ?? post.id);
+  const gid = forumThreadId(post);
   return {
     id: pos === 0 ? `thread:${board}:${gid}` : `reply:${board}:${gid}:${pos}`,
     type: pos === 0 ? "thread" : "reply",
@@ -1453,6 +1466,7 @@ function updateTaskStatus(task, active = 0) {
     + (task.mode === "online" ? ` · 原生搜索 ${metrics.nativePages} 页` : "")
     + (task.mode === "online" ? ` · 命中 ${state.onlineDocuments.length} 条` : "")
     + (task.mode === "index" && task.incrementalSkipped ? ` · 跳过 ${task.incrementalSkipped} 个未变化主题` : "")
+    + (metrics.skipped ? ` · 跳过 ${metrics.skipped} 个失效主题` : "")
     + (task.cachePages ? ` · 复用 ${task.cachePages} 个内容页（${formatTime(task.cacheOldestAt)} 获取）` : "")
     + (metrics.failures.length ? ` · 失败 ${metrics.failures.length} 项` : "")
     + (task.error ? ` · ${task.error}` : "");
@@ -1636,7 +1650,17 @@ async function executeTaskJob(task, job) {
     ? `/n/b/board/${encodeURIComponent(board.name)}.json?page=${page}`
     : `/n/b/article/${encodeURIComponent(board.name)}/${encodeURIComponent(post.gid)}.json?page=${page}`;
   const cached = job.kind === "article" && task.mode === "online" ? getSessionPage(path, task) : null;
-  const result = cached?.result || await requestApi(path, task);
+  let result;
+  try {
+    result = cached?.result || await requestApi(path, task);
+  } catch (error) {
+    if (job.kind === "article" && error?.code === "THREAD_NOT_FOUND") {
+      job.skipped = true;
+      job.skipReason = error.message || "主题不存在或主题数据无效";
+      return;
+    }
+    throw error;
+  }
   if (cached) {
     task.cachePages = (task.cachePages || 0) + 1;
     task.cacheOldestAt = Math.min(task.cacheOldestAt || cached.fetchedAt, cached.fetchedAt);
