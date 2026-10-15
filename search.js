@@ -80,6 +80,7 @@ const state = {
   boardSearch: "",
   boardSearchActiveIndex: -1,
   searchHistory: [],
+  searchHistoryActiveIndex: -1,
   searchSessions: [],
   indexMetadata: {},
   indexCoverage: {},
@@ -316,36 +317,70 @@ function renderSearchHistory() {
   const list = $("#search-history-list");
   if (!list) return;
   list.innerHTML = "";
-  if (!state.searchHistory.length) {
-    list.innerHTML = '<span class="field-help">暂无搜索记录</span>';
-    return;
-  }
-  state.searchHistory.forEach((entry) => {
+  const matches = searchHistoryMatches();
+  $("#clear-search-history").hidden = !state.searchHistory.length;
+  if (!matches.length) list.innerHTML = `<span class="field-help">${state.searchHistory.length ? "没有匹配的搜索记录" : "暂无搜索记录"}</span>`;
+  matches.forEach((entry, index) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "search-history-item";
+    button.id = `search-history-option-${index}`;
+    button.tabIndex = -1;
+    button.setAttribute("role", "option");
     button.title = entry.query;
     const title = document.createElement("strong");
     title.textContent = entry.query;
     const meta = document.createElement("span");
     meta.textContent = entry.mode === "local" ? "本地" : "在线";
     button.append(title, meta);
-    button.addEventListener("click", () => {
-      $("#query-input").value = entry.query;
-      if (entry.mode === "local") setSearchMode("local");
-      else setSearchMode("online");
-      if (Array.isArray(entry.boards) && entry.boards.length) setBoardSelection(entry.boards);
-      if (entry.options) applyIndexOptionValues(entry.options);
-      renderResults();
-    });
+    button.addEventListener("click", () => selectSearchHistory(entry));
     list.appendChild(button);
   });
-  const clear = document.createElement("button");
-  clear.type = "button";
-  clear.className = "text-button search-history-clear";
-  clear.textContent = "清空记录";
-  clear.addEventListener("click", () => { state.searchHistory = []; saveSearchHistory(); renderSearchHistory(); });
-  list.appendChild(clear);
+  updateSearchHistorySelection();
+}
+
+function searchHistoryMatches() {
+  const query = $("#query-input").value.trim().toLocaleLowerCase();
+  return state.searchHistory.filter((entry) => entry.query.toLocaleLowerCase().includes(query));
+}
+
+function setSearchHistoryOpen(open) {
+  $("#search-history").hidden = !open;
+  $("#query-input").setAttribute("aria-expanded", String(open));
+  if (!open) {
+    state.searchHistoryActiveIndex = -1;
+    updateSearchHistorySelection();
+  }
+}
+
+function updateSearchHistorySelection() {
+  const items = $("#search-history-list").querySelectorAll(".search-history-item");
+  if (state.searchHistoryActiveIndex >= items.length) state.searchHistoryActiveIndex = -1;
+  items.forEach((item, index) => {
+    const active = index === state.searchHistoryActiveIndex;
+    item.classList.toggle("is-active", active);
+    item.setAttribute("aria-selected", String(active));
+  });
+  const selected = items[state.searchHistoryActiveIndex];
+  if (selected) {
+    $("#query-input").setAttribute("aria-activedescendant", selected.id);
+    selected.scrollIntoView({ block: "nearest" });
+  } else $("#query-input").removeAttribute("aria-activedescendant");
+}
+
+function selectSearchHistory(entry) {
+  $("#query-input").value = entry.query;
+  setSearchMode(entry.mode === "local" ? "local" : "online");
+  if (Array.isArray(entry.boards) && entry.boards.length) setBoardSelection(entry.boards);
+  if (entry.options) applyIndexOptionValues(entry.options);
+  submitSearch();
+}
+
+function submitSearch() {
+  setSearchHistoryOpen(false);
+  if (state.searchMode === "online") return startOnlineSearch();
+  rememberSearch($("#query-input").value, "local");
+  renderResults();
 }
 
 async function loadSearchSessions() {
@@ -1680,6 +1715,16 @@ function setOnlineSearchStatus(message, running = state.onlineSearchRunning) {
   status.classList.toggle("is-running", running);
 }
 
+function setSearchStatusPanel(panelId, open) {
+  document.querySelectorAll("[data-status-panel]").forEach((button) => {
+    const id = button.dataset.statusPanel;
+    if (id !== panelId && !open) return;
+    const expanded = id === panelId && open;
+    button.setAttribute("aria-expanded", String(expanded));
+    $("#" + id).hidden = !expanded;
+  });
+}
+
 function setSettingsOpen(open) {
   const dialog = $("#search-settings");
   const layout = $("#app-layout");
@@ -1756,6 +1801,8 @@ function updateOnlineSearchControls() {
   const running = state.onlineSearchRunning;
   const paused = task?.phase === "paused";
   const failures = task?.jobs.filter((job) => job.status === "failed") || [];
+  $("#online-search-details-toggle").hidden = !online;
+  $("#search-progress-header").hidden = !online && $("#task-skipped-summary").hidden;
   $("#online-search-tools").hidden = !online || (!task && !state.onlineDocuments.length);
   $("#pause-online").hidden = !running;
   $("#pause-online").disabled = Boolean(task?.pauseRequested);
@@ -1834,7 +1881,8 @@ function updateTaskStatus(task, active = 0) {
   const skippedJobs = Object.values(state.tasks).filter(Boolean).flatMap((item) =>
     item.jobs.filter((job) => job.status === "done" && job.skipped && !job.ignored).map((job) => ({ ...job, mode: item.mode }))
   );
-  $("#task-skipped").hidden = !skippedJobs.length;
+  $("#task-skipped-summary").hidden = !skippedJobs.length;
+  if (!skippedJobs.length) setSearchStatusPanel("task-skipped", false);
   $("#task-skipped-summary").textContent = `已跳过主题（${skippedJobs.length}）`;
   $("#task-skipped-list").innerHTML = skippedJobs.map((job) => {
     const href = threadUrl({ type: "thread", board: job.board.name, gid: job.post.gid });
@@ -2186,8 +2234,8 @@ function setSearchMode(mode) {
   $("#search-mode-online").classList.toggle("is-active", online);
   $("#search-mode-local").setAttribute("aria-selected", String(!online));
   $("#search-mode-online").setAttribute("aria-selected", String(online));
-  $("#search-mode-description").textContent = online ? "边读取边搜索，结果陆续显示" : "搜索已保存的内容，无需联网";
   $("#online-search-status").hidden = !online;
+  if (!online) setSearchStatusPanel("online-search-status-details", false);
   if (online) {
     if (state.tasks.online) updateTaskStatus(state.tasks.online, state.onlineActiveWorkers);
     else setOnlineSearchStatus("", false);
@@ -2538,6 +2586,32 @@ async function clearIndex() {
 }
 
 function bindEvents() {
+  const queryInput = $("#query-input");
+  const historyWrap = $(".query-input-wrap");
+  const showSearchHistory = () => { renderSearchHistory(); setSearchHistoryOpen(true); };
+  queryInput.addEventListener("focus", showSearchHistory);
+  queryInput.addEventListener("click", showSearchHistory);
+  document.addEventListener("pointerdown", (event) => {
+    if (!historyWrap.contains(event.target)) setSearchHistoryOpen(false);
+  });
+  historyWrap.addEventListener("focusout", (event) => {
+    if (!historyWrap.contains(event.relatedTarget)) setSearchHistoryOpen(false);
+  });
+  $("#clear-search-history").addEventListener("click", () => {
+    state.searchHistory = [];
+    state.searchHistoryActiveIndex = -1;
+    saveSearchHistory();
+    queryInput.focus();
+    renderSearchHistory();
+  });
+  document.querySelectorAll("[data-status-panel]").forEach((button) => button.addEventListener("click", () => {
+    setSearchStatusPanel(button.dataset.statusPanel, button.getAttribute("aria-expanded") !== "true");
+  }));
+  $("#search-sessions-toggle").addEventListener("click", () => {
+    const panel = $("#search-sessions");
+    panel.hidden = !panel.hidden;
+    $("#search-sessions-toggle").setAttribute("aria-expanded", String(!panel.hidden));
+  });
   $("#result-list").addEventListener("toggle", (event) => {
     const details = event.target;
     if (!details.isConnected || !details.matches("details[data-reply-group]")) return;
@@ -2647,19 +2721,38 @@ function bindEvents() {
   $("#clear-index").addEventListener("click", () => clearIndex().catch((error) => showToast(error.message)));
   $("#search-mode-local").addEventListener("click", () => setSearchMode("local"));
   $("#search-mode-online").addEventListener("click", () => setSearchMode("online"));
-  $("#search-button").addEventListener("click", () => {
-    if (state.searchMode === "online") startOnlineSearch();
-    else { rememberSearch($("#query-input").value, "local"); renderResults(); }
-  });
+  $("#search-button").addEventListener("click", submitSearch);
   $("#query-input").addEventListener("input", () => {
+    state.searchHistoryActiveIndex = -1;
+    showSearchHistory();
     if (state.searchMode === "local") renderResults();
     else if (!state.onlineSearchRunning) setOnlineSearchStatus("关键词已改变，点击搜索开始新的在线扫描", false);
     updateOnlineSearchControls();
   });
   $("#query-input").addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    if (event.key === "Escape" && !$("#search-history").hidden) {
+      event.preventDefault();
+      setSearchHistoryOpen(false);
+      return;
+    }
+    if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+      event.preventDefault();
+      if ($("#search-history").hidden) showSearchHistory();
+      const count = searchHistoryMatches().length;
+      if (!count) return;
+      const current = state.searchHistoryActiveIndex;
+      state.searchHistoryActiveIndex = current < 0
+        ? event.key === "ArrowDown" ? 0 : count - 1
+        : (current + (event.key === "ArrowDown" ? 1 : -1) + count) % count;
+      updateSearchHistorySelection();
+      return;
+    }
     if (event.key !== "Enter") return;
-    if (state.searchMode === "online") startOnlineSearch();
-    else { rememberSearch($("#query-input").value, "local"); renderResults(); }
+    event.preventDefault();
+    const entry = !$("#search-history").hidden && searchHistoryMatches()[state.searchHistoryActiveIndex];
+    if (entry) selectSearchHistory(entry);
+    else submitSearch();
   });
   $("#sort-select").addEventListener("change", (event) => { state.sort = event.target.value; renderResults(); });
   $("#task-skipped-list").addEventListener("click", (event) => {

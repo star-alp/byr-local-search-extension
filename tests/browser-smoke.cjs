@@ -123,6 +123,64 @@ const scenario = String.raw`
   assert(state.sessionPages.size === 0 && state.sessionCacheBytes === 0, '页面重新打开不能从持久存储恢复正文会话缓存');
   assert(state.searchMode === 'online', '默认应为在线');
   assert(document.querySelector('#search-settings').hidden, '首页设置应折叠');
+  const historyInput = document.querySelector('#query-input');
+  const historyPopup = document.querySelector('#search-history');
+  const savedHistory = state.searchHistory;
+  const savedQuery = historyInput.value;
+  assert(historyPopup.hidden && historyPopup.tagName !== 'DETAILS', '最近搜索默认不占页面空间，也不再使用折叠行');
+  assert(!document.querySelector('#search-mode-description') && document.querySelector('.search-mode-row .query-help'), '搜索语法说明应移到模式切换右侧');
+  state.searchHistory = [
+    { query: '课程资料', mode: 'local' },
+    { query: '课程安排', mode: 'local' },
+    { query: '校园生活', mode: 'local' }
+  ];
+  historyInput.value = '';
+  const toolbarTop = document.querySelector('.result-tabs').getBoundingClientRect().top + scrollY;
+  historyInput.focus();
+  assert(!historyPopup.hidden && historyInput.getAttribute('aria-expanded') === 'true' && document.querySelectorAll('.search-history-item').length === 3, '聚焦搜索框应显示最近搜索浮层：' + JSON.stringify({ resume: Boolean(resume), hidden: historyPopup.hidden, expanded: historyInput.getAttribute('aria-expanded'), disabled: historyInput.disabled, focused: document.activeElement === historyInput, count: document.querySelectorAll('.search-history-item').length }));
+  assert(document.querySelector('.result-tabs').getBoundingClientRect().top + scrollY === toolbarTop, '历史浮层不能挤动搜索结果');
+  historyInput.value = '课程';
+  historyInput.dispatchEvent(new Event('input', { bubbles: true }));
+  assert(document.querySelectorAll('.search-history-item').length === 2, '输入内容应实时筛选历史记录');
+  const historyKey = (key, options = {}) => historyInput.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options }));
+  historyKey('ArrowDown');
+  assert(document.querySelector('.search-history-item.is-active').textContent.includes('课程资料'), '向下键应选中第一个匹配记录');
+  historyKey('ArrowUp');
+  assert(document.querySelector('.search-history-item.is-active').textContent.includes('课程安排'), '向上键应支持循环选择');
+  historyKey('Enter', { isComposing: true });
+  assert(historyInput.value === '课程' && !historyPopup.hidden, '中文输入法确认词语时不能提前提交搜索');
+  historyKey('Enter');
+  assert(historyInput.value === '课程安排' && state.searchMode === 'local' && state.searchHistory[0].query === '课程安排' && historyPopup.hidden, '回车应使用选中的历史记录实际开始搜索并关闭浮层');
+  historyInput.value = '';
+  historyInput.dispatchEvent(new Event('input', { bubbles: true }));
+  document.querySelector('.search-history-item').click();
+  assert(historyInput.value === '课程安排' && historyPopup.hidden, '鼠标点击历史记录也应直接搜索');
+  historyInput.click();
+  historyKey('Escape');
+  assert(historyPopup.hidden && historyInput.getAttribute('aria-expanded') === 'false' && !historyInput.hasAttribute('aria-activedescendant'), 'Escape应关闭浮层并清除选中状态');
+  historyInput.click();
+  document.querySelector('.result-tabs').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  assert(historyPopup.hidden, '点击搜索框之外应关闭历史浮层');
+  historyInput.click();
+  historyInput.blur();
+  assert(historyPopup.hidden, '焦点离开搜索框和历史区域后应关闭浮层');
+  historyInput.focus();
+  historyInput.value = '没有匹配的记录';
+  historyInput.dispatchEvent(new Event('input', { bubbles: true }));
+  historyKey('ArrowDown');
+  assert(!document.querySelector('.search-history-item') && historyPopup.textContent.includes('没有匹配的搜索记录'), '没有匹配时应显示空状态且不能选中不存在的记录');
+  document.querySelector('#clear-search-history').click();
+  assert(!state.searchHistory.length && historyPopup.textContent.includes('暂无搜索记录'), '清空记录后浮层应显示空状态');
+  state.searchHistory = savedHistory;
+  saveSearchHistory();
+  historyInput.value = savedQuery;
+  historyInput.blur();
+  setSearchHistoryOpen(false);
+  setSearchMode('online');
+  document.querySelector('#search-sessions-toggle').click();
+  assert(!document.querySelector('#search-sessions').hidden && document.querySelector('#search-sessions-toggle').getAttribute('aria-expanded') === 'true', '工具栏中的会话按钮应能在下一行展开会话');
+  document.querySelector('#search-sessions-toggle').click();
+  assert(document.querySelector('#search-sessions').hidden, '再次点击会话按钮应收起内容');
   assert(document.querySelector('#index-incremental').closest('.sidebar-details').textContent.includes('增量更新（只读取变化主题）'), '增量更新选项应在本地索引管理中清楚标识');
   const speed = document.querySelector('#request-speed');
   assert(speed.value === 'high' && state.requestConcurrency === 8 && state.requestDelayMs === 50, '请求速度默认应使用极速配置');
@@ -366,7 +424,7 @@ const scenario = String.raw`
   assert(boardResults('没有此版面 OR Talking').some(result => result.documentData.board === 'Talking'), '版面导航也应支持 OR');
   assert(new Set(state.onlineDocuments.map(doc => doc.id)).size === state.onlineDocuments.length, '多组查询不能产生重复结果');
   assert(state.tasks.online.jobs.filter(job => job.kind === 'native' && job.page === 1).length === 3, 'OR 应分别调用中文标题、缩写标题和缩写作者搜索');
-  assert(state.tasks.online.cachePages > 0 && document.querySelector('#online-search-status').textContent.includes('复用'), '缓存复用应标明节省的内容页');
+  assert(state.tasks.online.cachePages > 0 && document.querySelector('#online-search-status-details').textContent.includes('复用'), '缓存复用应标明节省的内容页');
   const contentRequestCount = () => Object.entries(counts).filter(([key]) => key.startsWith('/n/b/article/')).reduce((sum, [, value]) => sum + value, 0);
   const indexSizeBeforeCache = (await getAll('documents')).length;
   const requestsBeforeCache = contentRequestCount();
@@ -487,8 +545,32 @@ const scenario = String.raw`
   setSettingsOpen(true);
   assert(!document.querySelector('#search-settings').hidden, '设置应可展开');
   setSettingsOpen(false);
+  const previousTask = state.tasks.online;
+  const progressTask = ByrTasks.create('online', [{ name: 'Talking', description: '谈天说地' }], readIndexOptions(), '资料');
+  ByrTasks.enqueue(progressTask, { kind: 'article', board: progressTask.boards[0], post: { gid: '999' }, page: 1 });
+  Object.assign(progressTask.jobs[0], { status: 'done', skipped: true, skipReason: '主题不存在或主题数据无效' });
+  progressTask.phase = 'complete';
+  state.tasks.online = progressTask;
+  updateTaskStatus(progressTask);
+  const skippedToggle = document.querySelector('#task-skipped-summary');
+  const detailsToggle = document.querySelector('#online-search-details-toggle');
+  const progressDetails = document.querySelector('#online-search-status-details');
+  const skippedPanel = document.querySelector('#task-skipped');
+  assert(!skippedToggle.hidden && skippedToggle.textContent.includes('（1）') && skippedPanel.hidden, '跳过主题应作为同级按钮显示，列表默认折叠');
+  detailsToggle.click();
+  assert(!progressDetails.hidden && skippedPanel.hidden, '查看详情应只展开进度详情');
+  skippedToggle.click();
+  assert(progressDetails.hidden && !skippedPanel.hidden && detailsToggle.getAttribute('aria-expanded') === 'false', '展开跳过主题应自动收起进度详情');
+  updateTaskStatus(progressTask);
+  assert(!skippedPanel.hidden, '刷新搜索进度时不能收起用户已展开的跳过主题');
+  detailsToggle.click();
+  assert(!progressDetails.hidden && skippedPanel.hidden && skippedToggle.getAttribute('aria-expanded') === 'false', '再次展开进度详情应自动收起跳过主题');
+  detailsToggle.click();
+  assert(progressDetails.hidden && skippedPanel.hidden, '再次点击当前按钮应收起所有详情');
+  state.tasks.online = previousTask;
+  updateTaskStatus(previousTask);
   const result = { ok: true, onlineHits: state.onlineDocuments.length, savedDocuments: saved.length, orQueries: true, cacheFindsPreviouslyUnmatched: true, cacheReducesRequests: true, cacheScopeProtected: true, cacheExpiry: true, forceRefresh: true, replyMatchesOwnFields: true, nativePagination: true, nativePageLimit: true, nativeRetryOnlyFailed: true, mixedTimeSort: true, checkpointRecovered: true, reopenedPageRecovered: true, retryWithoutRepeating: true, historyPreserved: true, privacyAndResourcesInDialog: true, searchContinuesInModal: true, explicitPresetSelection: true, rangeInSidebar: true, manualFirst: true, presetSkipsManualPicker: true, scopePresets: state.scopePresets.length, presetsRemainIndependent: true, taskScopeProtected: true, scopeFiltersLocal: true };
-  Object.assign(result, { adaptiveRetries: true, retryBackoff: true, coverageMatchesScope: true, fillOnlyMissingPages: true, completedTopicsSkipped: true, incrementalToggleWorks: true, compactSnippets: true, replyExpansionPreserved: true, loggedOutNoticeChinese: true });
+  Object.assign(result, { adaptiveRetries: true, retryBackoff: true, coverageMatchesScope: true, fillOnlyMissingPages: true, completedTopicsSkipped: true, incrementalToggleWorks: true, compactSnippets: true, replyExpansionPreserved: true, loggedOutNoticeChinese: true, historyAutocomplete: true, historyKeyboardSearch: true, historyDismissal: true, progressPanelsExclusive: true });
   document.body.insertAdjacentHTML('beforeend', '<pre id="integration-result">' + JSON.stringify(result) + '</pre>');
   document.documentElement.dataset.smoke = 'finished';
 })().catch(error => document.body.insertAdjacentHTML('beforeend', '<pre id="integration-result">' + JSON.stringify({ ok: false, error: error.message, stack: error.stack }) + '</pre>'));
@@ -558,6 +640,7 @@ server.listen(0, "127.0.0.1", () => {
       const command = (method, params = {}) => new Promise((resolve) => {
         const next = ++id; pending.set(next, resolve); socket.send(JSON.stringify({ id: next, method, params }));
       });
+      await command("Emulation.setFocusEmulationEnabled", { enabled: true });
       await command("Page.navigate", { url: "http://127.0.0.1:" + server.address().port });
       let result;
       let phase;
@@ -592,6 +675,7 @@ server.listen(0, "127.0.0.1", () => {
       await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
       if (!await evaluate(`!document.getElementById('search-settings').open && document.getElementById('search-settings').hidden && !document.getElementById('settings-preferences-panel').inert && !document.querySelector('.search-panel').inert && getComputedStyle(document.documentElement).overflow!=='hidden' && getComputedStyle(document.body).overflow!=='hidden'`)) throw new Error('Escape没有关闭弹窗或恢复主界面');
       result.modalBlocksBackground = true;
+      await evaluate(`document.getElementById('online-search-status-summary').textContent='所选范围扫描完成 · 已找到 344 条';document.getElementById('task-skipped-summary').hidden=false;document.getElementById('task-skipped-summary').textContent='已跳过主题（1）';document.getElementById('task-skipped-list').innerHTML='<p>谈天说地 · 主题不存在或主题数据无效</p>';`);
       const checkLayout = async (expanded, width, modal = false) => {
         await command("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 600 });
         const value = await command("Runtime.evaluate", {
@@ -601,6 +685,9 @@ server.listen(0, "127.0.0.1", () => {
         if (layout.scroll > layout.width) throw new Error("页面出现横向溢出：" + JSON.stringify(layout));
         if (layout.sidebarScroll > layout.sidebarWidth) throw new Error("侧栏出现横向溢出：" + JSON.stringify(layout));
         if (width > 1040 && layout.sidebarLeft >= layout.searchLeft) throw new Error("桌面侧栏没有位于搜索区左侧");
+        const progress = JSON.parse(await evaluate(`(()=>{const summary=document.getElementById('online-search-status-summary');const toggle=document.getElementById('online-search-details-toggle');toggle.click();const detail=document.getElementById('online-search-status-details').getBoundingClientRect();const header=document.getElementById('search-progress-header').getBoundingClientRect();const title=summary.getBoundingClientRect();const button=toggle.getBoundingClientRect();const lineHeight=parseFloat(getComputedStyle(summary).lineHeight);toggle.click();return JSON.stringify({titleTop:title.top,buttonTop:button.top,titleHeight:title.height,lineHeight,detailTop:detail.top,headerBottom:header.bottom});})()`));
+        if (width > 1040 && Math.abs(progress.titleTop - progress.buttonTop) > 3) throw new Error('进度摘要和查看详情没有在同一行：' + JSON.stringify(progress));
+        if (progress.titleHeight > progress.lineHeight + 1 || progress.detailTop < progress.headerBottom) throw new Error('进度摘要换行或展开内容仍挤在标题旁边：' + JSON.stringify(progress));
         if (modal) {
           const modalLayout = JSON.parse(await evaluate(`(()=>{document.getElementById('open-settings').click();const dialog=document.getElementById('search-settings');const box=dialog.getBoundingClientRect();return JSON.stringify({left:box.left,right:box.right,top:box.top,bottom:box.bottom,width:dialog.clientWidth,scroll:dialog.scrollWidth});})()`));
           if (modalLayout.left < 0 || modalLayout.right > width || modalLayout.top < 0 || modalLayout.bottom > 900 || modalLayout.scroll > modalLayout.width) throw new Error('弹窗超出窗口或横向溢出：' + JSON.stringify(modalLayout));
@@ -620,6 +707,12 @@ server.listen(0, "127.0.0.1", () => {
         await evaluate(`document.getElementById('manual-board-details').open=false;document.getElementById('scope-presets-details').open=false;document.getElementById('start-index').closest('details').open=true;document.getElementById('index-coverage-details').open=true;state.expandedReplyGroups.clear();state.onlineDocuments=[{id:'thread:Talking:800',type:'thread',board:'Talking',gid:'800',title:'资料检索示例',content:'课程资料与经验分享。'.repeat(60),author:'alice'},...Array.from({length:5},(_,index)=>({id:'reply:Talking:800:'+index,type:'reply',board:'Talking',gid:'800',pos:index+1,content:'补充资料与使用经验。'.repeat(20),author:'bob'}))];state.onlineQuery='资料';document.getElementById('query-input').value='资料';document.getElementById('online-search-status-summary').textContent='所选范围扫描完成 · 已找到 6 条';renderResults();scrollTo(0,0);`);
         const screenshot = await command('Page.captureScreenshot', { format: 'png' });
         fs.writeFileSync(path.join(process.env.BYR_TEST_SCREENSHOT_DIR, 'compact-results-and-coverage.png'), Buffer.from(screenshot.result.data, 'base64'));
+        await evaluate(`document.getElementById('online-search-details-toggle').click();scrollTo(0,0);`);
+        const progressScreenshot = await command('Page.captureScreenshot', { format: 'png' });
+        fs.writeFileSync(path.join(process.env.BYR_TEST_SCREENSHOT_DIR, 'search-progress-expanded.png'), Buffer.from(progressScreenshot.result.data, 'base64'));
+        await evaluate(`document.getElementById('online-search-details-toggle').click();state.searchHistory=[{query:'课程资料',mode:'online'},{query:'课程安排',mode:'online'},{query:'校园生活',mode:'local'}];document.getElementById('query-input').value='课程';document.getElementById('query-input').focus();document.getElementById('query-input').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('query-input').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));scrollTo(0,0);`);
+        const historyScreenshot = await command('Page.captureScreenshot', { format: 'png' });
+        fs.writeFileSync(path.join(process.env.BYR_TEST_SCREENSHOT_DIR, 'search-history-popup.png'), Buffer.from(historyScreenshot.result.data, 'base64'));
       }
       // 使用真实 DOM 重现横幅与帖子共用 article 类，以及单页路由延迟替换正文。
       await command('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/jump#!article/StudyShare/7?byr_article_id=700&byr_highlight=' + encodeURIComponent('资料|teacher|C++') });
