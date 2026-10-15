@@ -209,6 +209,13 @@ h2 { margin: 0; font-size: 16px; }
 .task-failures summary { cursor: pointer; }
 #task-failures-list { max-height: 160px; overflow: auto; }
 #task-failures-list p { margin: 6px 0; }
+.task-skipped { margin-top: 10px; color: var(--muted); font-size: 12px; }
+.task-skipped summary { cursor: pointer; }
+#task-skipped-list { max-height: 180px; overflow: auto; }
+#task-skipped-list p { display: flex; align-items: center; gap: 7px; margin: 6px 0; }
+#task-skipped-list p > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#task-skipped-list a { color: var(--accent); }
+#task-skipped-list button { flex: 0 0 auto; border: 0; padding: 0; background: transparent; color: var(--accent); font-size: 11px; }
 .result-tabs { display: flex; gap: 22px; margin-top: 22px; border-bottom: 1px solid var(--line); }
 .result-tab { position: relative; border: 0; padding: 0 0 10px; background: transparent; color: var(--muted); }
 .result-tab.is-active { color: var(--accent); font-weight: 700; }

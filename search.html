@@ -205,6 +205,7 @@
         <button id="save-online-results" class="button button-secondary" type="button" hidden disabled>保存结果</button>
       </div>
       <details id="task-failures" class="task-failures" hidden><summary id="task-failures-summary">失败任务</summary><div id="task-failures-list"></div></details>
+      <details id="task-skipped" class="task-skipped" hidden><summary id="task-skipped-summary">已跳过主题</summary><div id="task-skipped-list"></div></details>
       <nav class="result-tabs" aria-label="搜索结果类型">
         <button class="result-tab is-active" data-type="all" type="button">综合</button>
         <button class="result-tab" data-type="thread" type="button">帖子</button>
@@ -229,6 +230,8 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="forum-model.js"></script>
+  <script src="forum-client.js"></script>
   <script src="task-engine.js"></script>
   <script src="search.js"></script>
 </body>

@@ -28,8 +28,10 @@ function page() {
     localStorage: { getItem() { return null; }, setItem() {} },
     chrome: { runtime: { async sendMessage() { throw new Error("不应发出请求"); } } }
   });
+  const model = fs.readFileSync(path.join(root, "forum-model.js"), "utf8");
+  const client = fs.readFileSync(path.join(root, "forum-client.js"), "utf8");
   const source = fs.readFileSync(path.join(root, "search.js"), "utf8").replace(/init\(\)\.catch\([\s\S]*$/, "");
-  vm.runInContext(source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, queryGroups, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument, boardPosts, forumThreadId };", context);
+  vm.runInContext(model + "\n" + client + "\n" + source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, queryGroups, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument, boardPosts, forumThreadId, ForumClient };", context);
   return { context, api: context.api };
 }
 
@@ -184,6 +186,14 @@ test("版面主题优先使用论坛提供的主题 id，失效主题不计入�
   assert.equal(metrics.skipped, 1);
   assert.equal(metrics.contentPages, 0);
   assert.equal(metrics.threads, 0);
+});
+
+test("论坛响应分类区分登录失效、主题失效和普通非 JSON", () => {
+  const { api } = page();
+  assert.equal(api.ForumClient.errorFromResponse({ status: 401, data: { success: false, message: "请登录" } }).code, "LOGIN_REQUIRED");
+  assert.equal(api.ForumClient.errorFromResponse({ status: 200, data: { success: false, code: "THREAD_NOT_FOUND", message: "主题不存在" } }).code, "THREAD_NOT_FOUND");
+  assert.equal(api.ForumClient.errorFromResponse({ status: 200, data: { success: false, code: "NON_JSON_RESPONSE", message: "论坛返回了非 JSON 内容" } }).code, "NON_JSON_RESPONSE");
+  assert.equal(api.ForumClient.nonJsonData("sys exception: \\\"\\\" in threads.php", { headers: { get: () => "text/html" } }).code, "THREAD_NOT_FOUND");
 });
 
 test("主题标题和版面上下文不能冒充回帖自身命中，正文与作者仍可查询", () => {

@@ -28,7 +28,7 @@ async function fetchViaForumPage(sourceTabId, message) {
   } catch (error) {
     if (!/Receiving end does not exist|Could not establish connection/iu.test(error.message || "")) throw error;
     // 扩展重载后，已打开的论坛页面可能还没有当前版本的内容脚本。
-    await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, files: ["content.js"] });
+    await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, files: ["forum-client.js", "content.js"] });
     response = await chrome.tabs.sendMessage(tab.id, message, { frameId: 0 });
   }
   return { ...response, sourceTabId: tab.id };

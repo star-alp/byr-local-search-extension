@@ -27,6 +27,9 @@ const RECOMMENDED_BOARD_NAMES = [
   "SCS", "SCSS", "Paper", "JobInfo", "BBShelp"
 ];
 
+const ForumModel = globalThis.ByrForumModel;
+const ForumClient = globalThis.ByrForumClient;
+
 const sourceTabIdValue = Number(new URLSearchParams(window.location.search).get("sourceTabId"));
 
 const state = {
@@ -718,17 +721,7 @@ async function requestApi(path, task) {
   });
   if (Number.isInteger(response?.sourceTabId)) state.sourceTabId = response.sourceTabId;
   if (!response?.ok || !response.data?.success) {
-    const forumMessage = String(response?.data?.message || response?.error || "");
-    if (response?.status === 401 || forumMessage.includes("登录")) {
-      throw new Error("论坛登录已失效，请先在论坛页面重新登录");
-    }
-    const invalidThread = /指定的文章不存在|文章不存在|链接错误/iu.test(forumMessage);
-    const error = new Error(forumMessage || "论坛请求失败");
-    error.code = response?.data?.code || (invalidThread ? "THREAD_NOT_FOUND" : "FORUM_REQUEST_FAILED");
-    error.preview = response?.data?.preview || "";
-    error.contentType = response?.data?.contentType || "";
-    error.status = response?.status || 0;
-    throw error;
+    throw ForumClient.errorFromResponse(response);
   }
   return response.data;
 }
@@ -745,9 +738,9 @@ async function requestForumText(path, task) {
   });
   if (Number.isInteger(response?.sourceTabId)) state.sourceTabId = response.sourceTabId;
   const text = String(response?.text || "");
-  if (!response?.ok) throw new Error(response?.error || "论坛原生搜索请求失败");
+  if (!response?.ok) throw ForumClient.errorFromResponse(response, "论坛原生搜索请求失败");
   if (text.includes("您未登录") || text.includes("请登录后继续操作")) {
-    throw new Error("论坛登录已失效，请先在论坛页面重新登录");
+    throw ForumClient.errorFromResponse({ status: response.status, data: { success: false, code: "LOGIN_REQUIRED", message: "论坛登录已失效" } });
   }
   return text;
 }
@@ -1140,7 +1133,7 @@ function updateIndexRangeSummary() {
 
 function boardPosts(data) {
   const posts = [...(data?.posts || []), ...(data?.topPosts || []), ...(data?.article || [])]
-    .map((post) => ({ ...post, gid: forumThreadId(post) }));
+    .map((post) => ForumModel.normalizeBoardPost(post));
   const seen = new Set();
   return posts.filter((post) => {
     const id = String(post?.gid || "");
@@ -1151,9 +1144,7 @@ function boardPosts(data) {
 }
 
 function forumThreadId(post) {
-  return [post?.gid, post?.id, post?.group_id]
-    .map((value) => String(value ?? "").trim())
-    .find(Boolean) || "";
+  return ForumModel.threadId(post);
 }
 
 function parseForumTime(value) {
@@ -1204,29 +1195,17 @@ function inIndexTimeRange(value, range) {
 }
 
 function buildForumDocument(board, boardDescription, post, result, article) {
-  const pos = Number(article.pos ?? article.position) || 0;
-  const articleUser = article.poster || article.user;
-  const postUser = post.poster || post.user;
-  const author = articleUser?.id || articleUser || postUser?.id || postUser || "已注销";
-  const authorName = articleUser?.user_name || articleUser?.username || "";
-  const articleId = String(article.id ?? article.ID ?? article.article_id ?? "").trim();
-  const gid = forumThreadId(post);
-  return {
-    id: pos === 0 ? `thread:${board}:${gid}` : `reply:${board}:${gid}:${pos}`,
-    type: pos === 0 ? "thread" : "reply",
+  const documentData = ForumModel.normalizeArticle({
     board,
     boardDescription,
-    gid,
-    title: htmlToText(result.data?.title || post.title),
-    content: htmlToText(article.content),
-    contentFetched: true,
-    author,
-    authorName,
-    articleId,
-    pos,
-    time: article.time ?? article.post_time ?? (pos === 0 ? postUpdatedTime(post) : null),
-    replyCount: postReplyCount(post),
-    url: threadUrl({ type: pos === 0 ? "thread" : "reply", board, gid, pos, articleId })
+    post,
+    result,
+    article,
+    toText: htmlToText
+  });
+  return {
+    ...documentData,
+    url: threadUrl(documentData)
   };
 }
 
@@ -1493,6 +1472,15 @@ function updateTaskStatus(task, active = 0) {
   $("#task-failures-list").innerHTML = failedJobs.map((job) =>
     `<p>${job.mode === "online" ? "在线搜索" : "本地更新"} · ${escapeHtml(job.board.description)} · ${job.kind === "native" ? "论坛快速搜索" : job.kind === "board" ? "主题列表" : `主题 ${escapeHtml(job.post.gid)}`} 第 ${job.page || 1} 页：${escapeHtml(job.error)}</p>`
   ).join("");
+  const skippedJobs = Object.values(state.tasks).filter(Boolean).flatMap((item) =>
+    item.jobs.filter((job) => job.status === "done" && job.skipped && !job.ignored).map((job) => ({ ...job, mode: item.mode }))
+  );
+  $("#task-skipped").hidden = !skippedJobs.length;
+  $("#task-skipped-summary").textContent = `已跳过主题（${skippedJobs.length}）`;
+  $("#task-skipped-list").innerHTML = skippedJobs.map((job) => {
+    const href = threadUrl({ type: "thread", board: job.board.name, gid: job.post.gid });
+    return `<p><span>${escapeHtml(job.board.description)} · 主题 ${escapeHtml(job.post.gid)}：${escapeHtml(job.skipReason || "主题不存在或主题数据无效")}</span><a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">打开</a><button type="button" data-retry-skipped="${escapeHtml(`${job.mode}:${job.id}`)}">重新检查</button></p>`;
+  }).join("");
   updateOnlineSearchControls();
   updatePerformanceLiveStatus();
 }
@@ -1654,7 +1642,7 @@ async function executeTaskJob(task, job) {
   try {
     result = cached?.result || await requestApi(path, task);
   } catch (error) {
-    if (job.kind === "article" && error?.code === "THREAD_NOT_FOUND") {
+    if (job.kind === "article" && ForumClient.isThreadUnavailable(error)) {
       job.skipped = true;
       job.skipReason = error.message || "主题不存在或主题数据无效";
       return;
@@ -1785,6 +1773,18 @@ async function continueTask(mode, retry = false) {
   if (retry) task.jobs.forEach((job) => {
     if (job.status === "failed") { job.status = "pending"; delete job.error; }
   });
+  await runTask(task);
+}
+
+async function retrySkippedJob(mode, jobId) {
+  if (state.indexRunning || state.onlineSearchRunning) return;
+  const task = state.tasks[mode];
+  const job = task?.jobs.find((item) => item.id === jobId && item.skipped);
+  if (!task || !job) return;
+  delete job.skipped;
+  delete job.skipReason;
+  job.status = "pending";
+  task.phase = "paused";
   await runTask(task);
 }
 
@@ -2251,6 +2251,12 @@ function bindEvents() {
     else { rememberSearch($("#query-input").value, "local"); renderResults(); }
   });
   $("#sort-select").addEventListener("change", (event) => { state.sort = event.target.value; renderResults(); });
+  $("#task-skipped-list").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-retry-skipped]");
+    if (!button) return;
+    const [mode, ...parts] = String(button.dataset.retrySkipped || "").split(":");
+    retrySkippedJob(mode, parts.join(":")).catch((error) => showToast(error.message || "重新检查失败"));
+  });
   document.querySelectorAll(".result-tab").forEach((tab) => tab.addEventListener("click", () => {
     document.querySelectorAll(".result-tab").forEach((item) => item.classList.remove("is-active"));
     tab.classList.add("is-active");
