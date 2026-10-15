@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = "byr-local-search";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const PERFORMANCE_PRESETS = Object.freeze({
   stable: { label: "省资源", concurrency: 2, delayMs: 500 },
   fast: { label: "平衡", concurrency: 4, delayMs: 200 },
@@ -21,6 +21,7 @@ const BOARD_SELECTION_STORAGE_KEY = "byr-search-board-selection";
 const INDEX_OPTIONS_STORAGE_KEY = "byr-search-index-options";
 const SCOPE_PRESETS_STORAGE_KEY = "byr-search-scope-presets";
 const SEARCH_HISTORY_STORAGE_KEY = "byr-search-history";
+const SEARCH_SESSIONS_MAX = 20;
 const INDEX_METADATA_STORAGE_KEY = "byr-search-index-metadata";
 const RECOMMENDED_BOARD_NAMES = [
   "AimGraduate", "GraduateSch", "SICE", "StudyShare", "Talking", "Fujian",
@@ -56,6 +57,7 @@ const state = {
   onlineRenderTimer: null,
   tasks: { online: null, index: null },
   savingOnlineResults: false,
+  savingSearchSession: false,
   checkpointTimer: null,
   checkpointWrites: Promise.resolve(),
   checkpointError: "",
@@ -76,12 +78,14 @@ const state = {
   boardSearch: "",
   boardSearchActiveIndex: -1,
   searchHistory: [],
+  searchSessions: [],
   indexMetadata: {},
   requestCount: 0,
   restoredOnlineTaskId: "",
   settingsBackgroundTargets: [],
   settingsGuardBound: false,
-  settingsScrollState: null
+  settingsScrollState: null,
+  coverageRenderTimer: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -286,6 +290,132 @@ function renderSearchHistory() {
   list.appendChild(clear);
 }
 
+async function loadSearchSessions() {
+  try {
+    state.searchSessions = (await getAll("sessions"))
+      .filter((item) => item && typeof item.id === "string" && typeof item.query === "string")
+      .sort((a, b) => Number(b.savedAt) - Number(a.savedAt))
+      .slice(0, SEARCH_SESSIONS_MAX);
+  } catch (_error) {
+    state.searchSessions = [];
+  }
+  renderSearchSessions();
+}
+
+function renderSearchSessions() {
+  const list = $("#search-session-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!state.searchSessions.length) {
+    list.innerHTML = '<span class="field-help">暂无保存的搜索会话</span>';
+    return;
+  }
+  state.searchSessions.forEach((session) => {
+    const row = document.createElement("div");
+    row.className = "search-session-item";
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "search-session-restore";
+    restore.title = session.query;
+    const title = document.createElement("strong");
+    title.textContent = session.name || session.query;
+    const meta = document.createElement("span");
+    meta.textContent = `${session.query} · ${Array.isArray(session.results) ? session.results.length : 0} 条 · ${formatTime(session.savedAt)}`;
+    restore.append(title, meta);
+    restore.addEventListener("click", () => restoreSearchSession(session.id));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "search-session-delete";
+    remove.textContent = "删除";
+    remove.addEventListener("click", () => deleteSearchSession(session.id));
+    row.append(restore, remove);
+    list.appendChild(row);
+  });
+}
+
+function sessionId() {
+  return globalThis.crypto?.randomUUID?.() || `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function saveSearchSession() {
+  if (state.savingSearchSession || state.indexRunning) return;
+  const task = state.tasks.online;
+  if (!task && !state.onlineDocuments.length) {
+    showToast("当前没有可保存的在线搜索结果");
+    return;
+  }
+  const query = state.onlineQuery || $("#query-input").value.trim();
+  const name = window.prompt("给本次搜索会话起个名称", query || "未命名搜索");
+  if (!name?.trim()) return;
+  state.savingSearchSession = true;
+  updateOnlineSearchControls();
+  try {
+    const record = {
+      id: sessionId(),
+      name: name.trim().slice(0, 80),
+      query,
+      boards: [...state.selectedBoardNames],
+      options: indexOptionValues(),
+      task: task ? ByrTasks.snapshot(task) : null,
+      results: structuredClone(state.onlineDocuments),
+      savedAt: Date.now()
+    };
+    await put("sessions", record);
+    const sessions = (await getAll("sessions")).sort((a, b) => Number(b.savedAt) - Number(a.savedAt));
+    const expired = sessions.slice(SEARCH_SESSIONS_MAX);
+    if (expired.length) await withStore("sessions", "readwrite", (store) => expired.forEach((item) => store.delete(item.id)));
+    await loadSearchSessions();
+    showToast(`已保存搜索会话“${record.name}”`);
+  } catch (error) {
+    showToast(error.message || "保存搜索会话失败");
+  } finally {
+    state.savingSearchSession = false;
+    updateOnlineSearchControls();
+  }
+}
+
+async function restoreSearchSession(id) {
+  if (state.onlineSearchRunning || state.indexRunning) {
+    showToast("当前任务运行中，请先暂停后再恢复搜索会话");
+    return;
+  }
+  const session = state.searchSessions.find((item) => item.id === id);
+  if (!session) return;
+  if ((state.onlineDocuments.length || state.tasks.online) && !window.confirm("恢复会话会替换当前在线搜索结果，继续吗？")) return;
+  if (state.boards.length) setBoardSelection(session.boards || []);
+  else {
+    state.selectedBoardNames = new Set(session.boards || []);
+    state.boardSelectionInitialized = true;
+    saveBoardSelection();
+  }
+  if (session.options) applyIndexOptionValues(session.options);
+  state.onlineQuery = session.query || "";
+  $("#query-input").value = state.onlineQuery;
+  state.onlineDocuments = Array.isArray(session.results) ? structuredClone(session.results) : [];
+  state.onlineDocumentMap = new Map(state.onlineDocuments.map((doc) => [doc.id, doc]));
+  await withStore("tasks", "readwrite", (store) => store.delete("online"));
+  state.tasks.online = session.task ? structuredClone(session.task) : null;
+  if (state.tasks.online) {
+    state.tasks.online.pauseRequested = false;
+    if (state.tasks.online.phase === "running") state.tasks.online.phase = "paused";
+    state.restoredOnlineTaskId = state.tasks.online.id || "";
+    updateTaskStatus(state.tasks.online);
+    await put("tasks", { ...ByrTasks.snapshot(state.tasks.online), results: structuredClone(state.onlineDocuments) });
+  }
+  setSearchMode("online");
+  renderResults();
+  updateOnlineSearchControls();
+  showToast("已恢复搜索会话，可继续扫描或查看当前结果");
+}
+
+async function deleteSearchSession(id) {
+  const session = state.searchSessions.find((item) => item.id === id);
+  if (!session || !window.confirm(`删除搜索会话“${session.name || session.query}”吗？`)) return;
+  await withStore("sessions", "readwrite", (store) => store.delete(id));
+  await loadSearchSessions();
+  showToast("已删除搜索会话");
+}
+
 function saveScopePresets() {
   localStorage.setItem(SCOPE_PRESETS_STORAGE_KEY, JSON.stringify({ presets: state.scopePresets, activeId: state.activeScopeId, selectionMode: "explicit" }));
 }
@@ -427,6 +557,7 @@ function openDatabase() {
         db.createObjectStore("boards", { keyPath: "name" });
       }
       if (!db.objectStoreNames.contains("tasks")) db.createObjectStore("tasks", { keyPath: "mode" });
+      if (!db.objectStoreNames.contains("sessions")) db.createObjectStore("sessions", { keyPath: "id" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -622,6 +753,49 @@ async function refreshResourceUsage() {
   $("#resource-summary").textContent = `${state.documents.length} 条内容 · ${formatBytes(new Blob([payload]).size)}`;
   pruneSessionPages();
   $("#resource-session-cache").textContent = `${state.sessionPages.size} 页 · ${formatBytes(state.sessionCacheBytes)}`;
+  renderIndexCoverage();
+}
+
+function renderIndexCoverage() {
+  const byBoard = new Map();
+  const ensure = (name, description = name) => {
+    if (!byBoard.has(name)) byBoard.set(name, { name, description, topics: new Set(), documents: 0, replies: 0, lastCheckedAt: 0 });
+    const item = byBoard.get(name);
+    if (description && item.description === item.name) item.description = description;
+    return item;
+  };
+  state.boards.forEach((board) => ensure(board.name, board.description));
+  state.documents.forEach((doc) => {
+    const item = ensure(doc.board, doc.boardDescription || doc.board);
+    item.documents += 1;
+    if (doc.type === "reply") item.replies += 1;
+    if (doc.gid) item.topics.add(String(doc.gid));
+    item.lastCheckedAt = Math.max(item.lastCheckedAt, Number(doc.updatedAt) || 0);
+  });
+  Object.entries(state.indexMetadata).forEach(([key, metadata]) => {
+    const separator = key.indexOf(":");
+    const boardName = separator >= 0 ? key.slice(0, separator) : key;
+    const item = ensure(boardName);
+    item.lastCheckedAt = Math.max(item.lastCheckedAt, Number(metadata?.checkedAt) || 0);
+  });
+  const rows = [...byBoard.values()].filter((item) => item.documents || item.lastCheckedAt).sort((a, b) => b.documents - a.documents || b.lastCheckedAt - a.lastCheckedAt);
+  const totalTopics = new Set(state.documents.filter((doc) => doc.gid).map((doc) => `${doc.board}:${doc.gid}`)).size;
+  const latest = rows.reduce((value, item) => Math.max(value, item.lastCheckedAt), 0);
+  $("#index-coverage-summary").textContent = state.documents.length
+    ? `${totalTopics} 个主题 · ${state.documents.length} 条内容 · ${rows.length} 个版面${latest ? ` · 最近 ${formatTime(latest)}` : ""}`
+    : "尚未建立索引";
+  $("#index-coverage-details").hidden = !rows.length;
+  $("#index-coverage-list").innerHTML = rows.map((item) =>
+    `<div class="index-coverage-row"><span title="${escapeHtml(item.name)}">${escapeHtml(item.description || item.name)}</span><span>${item.topics.size} 主题 · ${item.replies} 回帖${item.lastCheckedAt ? ` · ${escapeHtml(formatTime(item.lastCheckedAt))}` : ""}</span></div>`
+  ).join("");
+}
+
+function scheduleIndexCoverageRender() {
+  if (state.coverageRenderTimer) return;
+  state.coverageRenderTimer = window.setTimeout(() => {
+    state.coverageRenderTimer = null;
+    renderIndexCoverage();
+  }, 180);
 }
 
 function setIndexStatus(message, progress = null) {
@@ -641,14 +815,87 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function tokenizeSearchQuery(query) {
+  const tokens = [];
+  let value = "";
+  let quoted = false;
+  let inQuotes = false;
+  const push = () => {
+    if (value) tokens.push({ value: value.toLocaleLowerCase(), quoted });
+    value = "";
+    quoted = false;
+  };
+  for (const character of String(query || "").trim()) {
+    if (character === '"') {
+      inQuotes = !inQuotes;
+      quoted = true;
+    } else if (/\s/u.test(character) && !inQuotes) {
+      push();
+    } else {
+      value += character;
+    }
+  }
+  push();
+  return { tokens, valid: !inQuotes };
+}
+
+function parseSearchQuery(query) {
+  const tokenized = tokenizeSearchQuery(query);
+  const groups = [[]];
+  const filters = { author: [], board: [], type: [] };
+  const excludes = [];
+  let valid = tokenized.valid;
+  tokenized.tokens.forEach((token) => {
+    if (token.value === "or" && !token.quoted) {
+      if (!groups.at(-1).length) valid = false;
+      groups.push([]);
+      return;
+    }
+    groups.at(-1).push(token.value);
+  });
+  if (!groups.at(-1).length) valid = false;
+  const positiveGroups = groups.map((group) => group.filter((token) => {
+    let value = token;
+    let negative = false;
+    if (value.startsWith("-")) {
+      negative = true;
+      value = value.slice(1).trim();
+    }
+    const filter = value.match(/^(作者|author|版面|board|类型|type):(.+)$/iu);
+    if (filter) {
+      const field = filter[1].toLocaleLowerCase();
+      const filterValue = filter[2].trim();
+      if (!filterValue) { valid = false; return false; }
+      if (negative) excludes.push(filterValue);
+      else if (field === "作者" || field === "author") filters.author.push(filterValue);
+      else if (field === "版面" || field === "board") filters.board.push(filterValue);
+      else {
+        const type = { 帖子: "thread", 主题: "thread", 回帖: "reply", 用户: "user", 版面: "board" }[filterValue] || filterValue;
+        filters.type.push(type);
+      }
+      return false;
+    }
+    if (!value) { valid = false; return false; }
+    if (negative) {
+      excludes.push(value);
+      return false;
+    }
+    return true;
+  }));
+  const cleanedGroups = positiveGroups.map((group) => [...new Set(group)]).filter((group) => group.length);
+  const terms = [...new Set(cleanedGroups.flat())];
+  const hasFilter = Object.values(filters).some((values) => values.length);
+  if (!terms.length && !hasFilter) valid = false;
+  return { groups: cleanedGroups, terms, filters, excludes: [...new Set(excludes)], hasPositive: terms.length > 0, valid };
+}
+
 function queryGroups(query) {
-  const groups = query.trim().toLocaleLowerCase().split(/(?:^|\s)or(?=\s|$)/u)
-    .map((group) => [...new Set(group.trim().split(/\s+/u).filter(Boolean))]);
-  return groups.every((group) => group.length) ? groups : [];
+  const parsed = parseSearchQuery(query);
+  return parsed.valid ? parsed.groups : [];
 }
 
 function termsFromQuery(query) {
-  return [...new Set(queryGroups(query).flat())];
+  return parseSearchQuery(query).terms;
 }
 
 function matchingTerms(text, groups) {
@@ -1209,8 +1456,8 @@ function buildForumDocument(board, boardDescription, post, result, article) {
   };
 }
 
-function documentMatchesTerms(documentData, groups) {
-  return Boolean(matchDocument(documentData, groups));
+function documentMatchesTerms(documentData, groups, criteria = null) {
+  return Boolean(matchDocument(documentData, groups, criteria));
 }
 
 function scheduleOnlineRender() {
@@ -1221,8 +1468,8 @@ function scheduleOnlineRender() {
   }, 160);
 }
 
-function addOnlineDocument(documentData, groups) {
-  if (!documentMatchesTerms(documentData, groups)) return;
+function addOnlineDocument(documentData, groups, criteria = null) {
+  if (!documentMatchesTerms(documentData, groups, criteria)) return;
   const exists = state.onlineDocumentMap.has(documentData.id);
   documentData = mergeDocument(state.onlineDocumentMap.get(documentData.id), documentData);
   state.onlineDocumentMap.set(documentData.id, documentData);
@@ -1268,15 +1515,15 @@ function getSessionPage(path, task) {
   return entry;
 }
 
-function mergeOnlineDocuments(documents, groups) {
+function mergeOnlineDocuments(documents, groups, criteria = null) {
   documents.forEach((doc) => {
     const previous = state.onlineDocumentMap.get(doc.id);
     if (doc.cachePreview && previous?.contentFetched && !previous.cachePreview) return;
     if (previous?.fetchedAt > doc.fetchedAt) return;
     // 最新正文不再匹配时，移除此前显示的缓存命中或快速候选。
-    if (!documentMatchesTerms(doc, groups)) {
+    if (!documentMatchesTerms(doc, groups, criteria)) {
       if (state.onlineDocumentMap.delete(doc.id)) state.onlineDocuments = state.onlineDocuments.filter((item) => item.id !== doc.id);
-    } else addOnlineDocument(doc, groups);
+    } else addOnlineDocument(doc, groups, criteria);
   });
   scheduleOnlineRender();
 }
@@ -1296,7 +1543,8 @@ function readArticleDocuments(board, post, result, range) {
 
 function primeSessionResults(task) {
   pruneSessionPages();
-  const groups = queryGroups(task.query);
+  const criteria = parseSearchQuery(task.query);
+  const groups = criteria.groups;
   task.boards.forEach((board) => {
     const boardPrefix = `/n/b/board/${encodeURIComponent(board.name)}.json?page=`;
     const posts = new Map();
@@ -1312,7 +1560,7 @@ function primeSessionResults(task) {
         if (!path.startsWith(prefix)) return;
         const cached = getSessionPage(path, task);
         if (cached) mergeOnlineDocuments(readArticleDocuments(board, post, cached.result, task.options.timeRange)
-          .map((doc) => ({ ...doc, cachedAt: cached.fetchedAt, fetchedAt: cached.fetchedAt, cachePreview: true })), groups);
+          .map((doc) => ({ ...doc, cachedAt: cached.fetchedAt, fetchedAt: cached.fetchedAt, cachePreview: true })), groups, criteria);
       });
     });
   });
@@ -1416,6 +1664,9 @@ function updateOnlineSearchControls() {
   $("#new-online").hidden = !paused || running;
   $("#save-online-results").hidden = !state.onlineDocuments.length;
   $("#save-online-results").disabled = state.savingOnlineResults || state.indexRunning || !state.onlineDocuments.length;
+  const canSaveSession = online && Boolean(task || state.onlineDocuments.length);
+  $("#save-search-session").hidden = !canSaveSession;
+  $("#save-search-session").disabled = state.savingSearchSession || state.indexRunning || !canSaveSession;
   $("#search-button").disabled = online && (running || state.indexRunning);
   $("#search-button").textContent = online && paused ? "新搜索" : "搜索";
   $("#query-input").disabled = online && running;
@@ -1483,6 +1734,7 @@ function updateTaskStatus(task, active = 0) {
   }).join("");
   updateOnlineSearchControls();
   updatePerformanceLiveStatus();
+  scheduleIndexCoverageRender();
 }
 
 function nativeSearchDays(timeRange) {
@@ -1495,15 +1747,18 @@ function nativeSearchValue(value) {
 }
 
 function nativeSearchPaths(boardName, query, options) {
-  const groups = queryGroups(query);
+  const criteria = parseSearchQuery(query);
+  const groups = criteria.groups;
   const common = `b=${nativeSearchValue(boardName)}&d=${nativeSearchDays(options.timeRange)}`;
-  return [...new Set(groups.flatMap((terms) => {
+  const paths = groups.flatMap((terms) => {
     const titleTerms = [`t1=${nativeSearchValue(terms[0])}`];
     if (terms[1]) titleTerms.push(`t2=${nativeSearchValue(terms[1])}`);
-    const paths = [`/s/article?${common}&${titleTerms.join("&")}`];
-    if (terms.length === 1 && /^[a-z][a-z0-9_]{1,19}$/u.test(terms[0])) paths.push(`/s/article?${common}&au=${nativeSearchValue(terms[0])}`);
-    return paths;
-  }))];
+    return [`/s/article?${common}&${titleTerms.join("&")}`];
+  });
+  criteria.filters.author.forEach((author) => paths.push(`/s/article?${common}&au=${nativeSearchValue(author)}`));
+  criteria.groups.filter((terms) => terms.length === 1 && /^[a-z][a-z0-9_]{1,19}$/u.test(terms[0]))
+    .forEach((terms) => paths.push(`/s/article?${common}&au=${nativeSearchValue(terms[0])}`));
+  return [...new Set(paths)];
 }
 
 function nativeResultTime(value) {
@@ -1512,7 +1767,7 @@ function nativeResultTime(value) {
   return text;
 }
 
-function parseNativeSearchPage(html, fallbackBoard, groups, path, pageLimit) {
+function parseNativeSearchPage(html, fallbackBoard, groups, path, pageLimit, criteria = null) {
   const documentNode = new DOMParser().parseFromString(String(html || ""), "text/html");
   const results = [];
   documentNode.querySelectorAll(".board-list tr").forEach((row) => {
@@ -1539,7 +1794,7 @@ function parseNativeSearchPage(html, fallbackBoard, groups, path, pageLimit) {
       nativeSearch: true,
       url: threadUrl({ type: "thread", board: boardName, gid })
     };
-    if (documentMatchesTerms(documentData, groups)) results.push(documentData);
+    if (matchDocument(documentData, groups, criteria || { groups, hasPositive: groups.length, excludes: [], filters: { author: [], board: [], type: [] } })) results.push(documentData);
   });
   const currentUrl = new URL(path, "https://bbs.byr.cn");
   const page = Number(currentUrl.searchParams.get("p")) || 1;
@@ -1613,22 +1868,26 @@ function enqueuePage(task, kind, board, page = 1, post = null) {
   if (kind !== "article" || task.mode !== "online") return;
   const path = `/n/b/article/${encodeURIComponent(board.name)}/${encodeURIComponent(post.gid)}.json?page=${page}`;
   const cached = getSessionPage(path, task);
-  if (cached) mergeOnlineDocuments(readArticleDocuments(board, post, cached.result, task.options.timeRange)
-    .map((doc) => ({ ...doc, cachedAt: cached.fetchedAt, fetchedAt: cached.fetchedAt, cachePreview: true })), queryGroups(task.query));
+  if (cached) {
+    const criteria = parseSearchQuery(task.query);
+    mergeOnlineDocuments(readArticleDocuments(board, post, cached.result, task.options.timeRange)
+      .map((doc) => ({ ...doc, cachedAt: cached.fetchedAt, fetchedAt: cached.fetchedAt, cachePreview: true })), criteria.groups, criteria);
+  }
 }
 
 async function executeTaskJob(task, job) {
   checkTaskCancelled(task);
-  const groups = queryGroups(task.query);
+  const criteria = parseSearchQuery(task.query);
+  const groups = criteria.groups;
   const { board, post, page } = job;
   if (job.kind === "native") {
     const html = await requestForumText(job.path, task);
-    const nativePage = parseNativeSearchPage(html, board, groups, job.path, task.options.boardPageLimit);
+    const nativePage = parseNativeSearchPage(html, board, groups, job.path, task.options.boardPageLimit, parseSearchQuery(task.query));
     if (nativePage.nextPath) ByrTasks.enqueue(task, { kind: "native", board, path: nativePage.nextPath, page: page + 1 });
     const results = nativePage.documents
       .filter((doc) => inIndexTimeRange(doc.time, task.options.timeRange));
     results.forEach((doc) => {
-      addOnlineDocument(doc, groups);
+      addOnlineDocument(doc, groups, criteria);
       // 原生搜索找到的历史主题也读取正文，补全快速候选。
       enqueuePage(task, "article", board, 1, { gid: doc.gid, title: doc.title, poster: doc.author, time: doc.time });
     });
@@ -1668,7 +1927,7 @@ async function executeTaskJob(task, job) {
   const documents = readArticleDocuments(board, post, result, task.options.timeRange)
     .map((doc) => ({ ...doc, cachedAt: cached?.fetchedAt || null, fetchedAt, cachePreview: false }));
   if (task.mode === "online") {
-    mergeOnlineDocuments(documents, groups);
+    mergeOnlineDocuments(documents, groups, criteria);
   } else {
     try {
       await saveDocuments(documents);
@@ -1727,7 +1986,7 @@ async function startNewTask(mode, fresh = false, overrides = {}) {
   if (state.indexRunning || state.onlineSearchRunning) return;
   const query = mode === "online" ? $("#query-input").value.trim() : "";
   if (mode === "online" && !query) { showToast("请输入搜索关键词"); return; }
-  if (mode === "online" && !queryGroups(query).length) { showToast("OR 两侧都需要填写关键词，例如：关键词1 OR 关键词2"); return; }
+  if (mode === "online" && !parseSearchQuery(query).valid) { showToast("请检查关键词、OR 或筛选条件"); return; }
   if (mode === "online") rememberSearch(query, mode);
   const previous = state.tasks[mode];
   if (previous?.phase === "paused" && !window.confirm("开始新任务会替换当前暂停任务的进度，已保存的本地内容会保留。继续吗？")) return;
@@ -1822,17 +2081,25 @@ function startOnlineSearch() {
   return startNewTask("online");
 }
 
-function matchDocument(documentData, groups) {
-  if (!groups.length) return null;
+function matchDocument(documentData, groups, criteria = null) {
+  const queryCriteria = criteria || { groups, excludes: [], filters: { author: [], board: [], type: [] }, hasPositive: groups.length > 0 };
+  if (!groups.length && !Object.values(queryCriteria.filters || {}).some((values) => values.length)) return null;
   // 回帖只匹配自身正文和作者，主题标题、版面信息只是上下文。
   const keys = documentData.type === "reply" ? ["content", "author", "authorName"]
     : ["title", "content", "author", "authorName", "board", "boardDescription"];
   const fields = keys.map((key) => [key, String(documentData[key] || "").toLocaleLowerCase()]);
   const text = fields.map(([, value]) => value).join(" ");
+  if ((queryCriteria.excludes || []).some((term) => text.includes(term))) return null;
+  const filters = queryCriteria.filters || { author: [], board: [], type: [] };
+  const authorText = `${documentData.author || ""} ${documentData.authorName || ""}`.toLocaleLowerCase();
+  const boardText = `${documentData.board || ""} ${documentData.boardDescription || ""}`.toLocaleLowerCase();
+  if (filters.author.length && !filters.author.some((term) => authorText.includes(term))) return null;
+  if (filters.board.length && !filters.board.some((term) => boardText.includes(term))) return null;
+  if (filters.type.length && !filters.type.includes(documentData.type)) return null;
   const terms = matchingTerms(text, groups);
-  if (!terms.length) return null;
+  if (queryCriteria.hasPositive && !terms.length) return null;
   const weights = { title: 8, content: 4, author: 7, authorName: 7, board: 2, boardDescription: 2 };
-  let score = 0;
+  let score = filters.author.length + filters.board.length + filters.type.length;
   const matchedFields = [];
   fields.forEach(([key, value]) => {
     const count = terms.filter((term) => value.includes(term)).length;
@@ -1904,24 +2171,30 @@ function searchSourceDocuments() {
 }
 
 function searchDocuments(query) {
-  const groups = queryGroups(query);
-  if (!groups.length) return [];
+  const criteria = parseSearchQuery(query);
+  if (!criteria.valid) return [];
+  const groups = criteria.groups;
   const source = searchSourceDocuments();
-  const candidates = source.filter((documentData) => state.activeType === "all" || documentData.type === state.activeType);
+  const candidates = source.filter((documentData) => (state.activeType === "all" || documentData.type === state.activeType)
+    && (!criteria.filters.type.length || criteria.filters.type.includes(documentData.type)));
   return candidates.map((documentData) => {
-    const match = matchDocument(documentData, groups);
+    const match = matchDocument(documentData, groups, criteria);
     return match ? { documentData, ...match } : null;
   }).filter(Boolean).sort(compareResults);
 }
 
 function boardResults(query) {
-  const groups = queryGroups(query);
-  const terms = termsFromQuery(query);
-  if (!terms.length) return [];
+  const criteria = parseSearchQuery(query);
+  const groups = criteria.groups;
+  const terms = criteria.terms;
+  if (!criteria.valid) return [];
   return state.boards.filter((board) => {
     if (state.searchMode === "local" && !state.selectedBoardNames.has(board.name)) return false;
     const fields = `${board.name} ${board.description}`.toLocaleLowerCase();
-    return matchingTerms(fields, groups).length > 0;
+    if (criteria.excludes.some((term) => fields.includes(term))) return false;
+    if (criteria.filters.board.length && !criteria.filters.board.some((term) => fields.includes(term))) return false;
+    if (criteria.filters.type.length && !criteria.filters.type.includes("board")) return false;
+    return !criteria.hasPositive || matchingTerms(fields, groups).length > 0;
   }).map((board) => ({
     documentData: {
       id: `board:${board.name}`,
@@ -1937,16 +2210,21 @@ function boardResults(query) {
 }
 
 function userResults(query) {
-  const groups = queryGroups(query);
-  const terms = termsFromQuery(query);
-  if (!terms.length) return [];
+  const criteria = parseSearchQuery(query);
+  const groups = criteria.groups;
+  const terms = criteria.terms;
+  if (!criteria.valid) return [];
   const users = new Map();
   const source = searchSourceDocuments();
   source.forEach((documentData) => {
     const id = documentData.author || "";
     const name = documentData.authorName || "";
     const fields = `${id} ${name}`.toLocaleLowerCase();
-    if (!id || !matchingTerms(fields, groups).length) return;
+    if (!id || (criteria.hasPositive && !matchingTerms(fields, groups).length)) return;
+    if (criteria.excludes.some((term) => fields.includes(term))) return;
+    if (criteria.filters.author.length && !criteria.filters.author.some((term) => fields.includes(term))) return;
+    if (criteria.filters.board.length && !criteria.filters.board.some((term) => String(documentData.board || "").toLocaleLowerCase().includes(term))) return;
+    if (criteria.filters.type.length && !criteria.filters.type.includes(documentData.type)) return;
     const current = users.get(id) || { id, name, count: 0, latest: documentData.time, board: documentData.board, documentData };
     current.count += 1;
     if ((parseForumTime(documentData.time) ?? -Infinity) > (parseForumTime(current.latest) ?? -Infinity)) current.latest = documentData.time;
@@ -2034,9 +2312,9 @@ function renderResults() {
     list.innerHTML = `<div class="empty-state"><strong>输入关键词开始搜索</strong><p>${state.searchMode === "online" ? "点击搜索后会扫描当前选择的版面范围。" : "结果会在当前浏览器本地完成匹配。"}</p></div>`;
     return;
   }
-  if (!queryGroups(query).length) {
+  if (!parseSearchQuery(query).valid) {
     $("#result-count").textContent = "请检查关键词";
-    list.innerHTML = '<div class="empty-state"><strong>OR 两侧都需要关键词</strong><p>例如：关键词1 OR 关键词2</p></div>';
+    list.innerHTML = '<div class="empty-state"><strong>搜索条件格式有误</strong><p>请检查引号、OR 或筛选条件。</p></div>';
     return;
   }
   let results;
@@ -2230,6 +2508,7 @@ function bindEvents() {
   $("#request-delay").addEventListener("blur", normalizePerformanceInput);
   $("#refresh-resources").addEventListener("click", () => refreshResourceUsage().catch((error) => showToast(error.message || "资源统计失败")));
   $("#save-online-results").addEventListener("click", () => saveOnlineResults());
+  $("#save-search-session").addEventListener("click", () => saveSearchSession());
   $("#board-select").addEventListener("change", updateBoardSelectionStatus);
   $("#start-index").addEventListener("click", startIndex);
   $("#pause-index").addEventListener("click", pauseIndex);
@@ -2273,6 +2552,7 @@ async function init() {
   loadSavedIndexOptions();
   loadIndexMetadata();
   loadSearchHistory();
+  await loadSearchSessions();
   loadScopePresets();
   updateIndexRangeSummary();
   setSearchMode("online");

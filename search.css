@@ -186,6 +186,15 @@ h2 { margin: 0; font-size: 16px; }
 .search-history-item strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; }
 .search-history-item span { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
 .search-history-clear { justify-self: end; }
+.search-session-list { display: grid; gap: 4px; margin-top: 5px; }
+.search-session-item { display: flex; align-items: stretch; gap: 5px; }
+.search-session-restore { min-width: 0; flex: 1 1 auto; display: grid; gap: 2px; border: 0; border-radius: 3px; padding: 5px 7px; background: var(--soft); color: var(--ink); text-align: left; }
+.search-session-restore:hover { background: #e7f0f1; }
+.search-session-restore strong, .search-session-restore span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-session-restore strong { font-size: 11px; font-weight: 600; }
+.search-session-restore span { color: var(--muted); font-size: 10px; }
+.search-session-delete { flex: 0 0 auto; border: 0; padding: 0 5px; background: transparent; color: var(--muted); font-size: 10px; }
+.search-session-delete:hover { color: var(--danger); }
 
 .search-panel { min-height: 480px; padding: 22px 24px; }
 .search-mode-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
@@ -216,6 +225,16 @@ h2 { margin: 0; font-size: 16px; }
 #task-skipped-list p > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #task-skipped-list a { color: var(--accent); }
 #task-skipped-list button { flex: 0 0 auto; border: 0; padding: 0; background: transparent; color: var(--accent); font-size: 11px; }
+.index-coverage { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.index-coverage-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.index-coverage-heading strong { color: var(--ink); font-size: 12px; }
+.index-coverage-heading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#index-coverage-details { margin-top: 5px; }
+#index-coverage-details summary { cursor: pointer; color: var(--accent); }
+#index-coverage-list { display: grid; gap: 4px; max-height: 180px; overflow: auto; margin-top: 5px; }
+.index-coverage-row { display: flex; justify-content: space-between; gap: 8px; }
+.index-coverage-row span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.index-coverage-row span:last-child { flex: 0 0 auto; }
 .result-tabs { display: flex; gap: 22px; margin-top: 22px; border-bottom: 1px solid var(--line); }
 .result-tab { position: relative; border: 0; padding: 0 0 10px; background: transparent; color: var(--muted); }
 .result-tab.is-active { color: var(--accent); font-weight: 700; }

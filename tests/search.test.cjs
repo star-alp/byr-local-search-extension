@@ -31,7 +31,7 @@ function page() {
   const model = fs.readFileSync(path.join(root, "forum-model.js"), "utf8");
   const client = fs.readFileSync(path.join(root, "forum-client.js"), "utf8");
   const source = fs.readFileSync(path.join(root, "search.js"), "utf8").replace(/init\(\)\.catch\([\s\S]*$/, "");
-  vm.runInContext(model + "\n" + client + "\n" + source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, queryGroups, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument, boardPosts, forumThreadId, ForumClient };", context);
+  vm.runInContext(model + "\n" + client + "\n" + source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, queryGroups, parseSearchQuery, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument, boardPosts, forumThreadId, ForumClient };", context);
   return { context, api: context.api };
 }
 
@@ -276,6 +276,23 @@ test("OR 分组保持组内同时匹配，合并命中且不把 OR 当作关键�
   assert.equal(api.queryGroups("陶小峰 OR").length, 0);
   assert.equal(api.queryGroups("陶小峰 OR OR txf").length, 0);
   assert.deepEqual(Array.from(api.queryGroups("forum"), group => Array.from(group)), [["forum"]]);
+});
+
+test("高级搜索条件只影响匹配范围，不污染关键词和高亮词", () => {
+  const { api } = page();
+  const parsed = api.parseSearchQuery('"机器 学习" -广告 作者:alice 版面:StudyShare 类型:回帖');
+  assert.equal(parsed.valid, true);
+  assert.deepEqual(Array.from(parsed.groups, group => Array.from(group)), [["机器 学习"]]);
+  assert.deepEqual(Array.from(parsed.terms), ["机器 学习"]);
+  assert.deepEqual(Array.from(parsed.excludes), ["广告"]);
+  assert.deepEqual({ author: Array.from(parsed.filters.author), board: Array.from(parsed.filters.board), type: Array.from(parsed.filters.type) }, { author: ["alice"], board: ["studyshare"], type: ["reply"] });
+  const reply = { type: "reply", content: "机器 学习资料", author: "alice", authorName: "同学", board: "StudyShare", boardDescription: "学习交流" };
+  assert.ok(api.matchDocument(reply, parsed.groups, parsed));
+  assert.equal(api.matchDocument({ ...reply, content: "机器 学习广告" }, parsed.groups, parsed), null);
+  assert.equal(api.matchDocument({ ...reply, author: "bob" }, parsed.groups, parsed), null);
+  assert.equal(api.parseSearchQuery('作者:alice').valid, true);
+  assert.ok(api.matchDocument({ ...reply, content: "无关键词" }, api.parseSearchQuery('作者:alice').groups, api.parseSearchQuery('作者:alice')));
+  assert.equal(api.parseSearchQuery('课程 OR').valid, false);
 });
 
 test("主题结果按父子结构保留正文与回帖的独立命中", () => {
