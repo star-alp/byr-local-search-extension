@@ -156,7 +156,8 @@ globalThis.ByrAgent = (() => {
       getCapabilities: guarded(() => ({
         name: "邮人全搜", globalName: GLOBAL_NAME, transport: "Chrome DevTools Protocol / 本地 Agent Bridge", ready,
         methods: {
-          getCapabilities: {}, getStatus: {}, getContext: {}, previewSearch: { description: "与 startSearch 参数相同，仅评估范围和请求量" },
+          getCapabilities: {}, getStatus: {}, getContext: {}, getResourceUsage: {}, getFailures: {},
+          previewSearch: { description: "与 startSearch 参数相同，仅评估范围和请求量" }, setRequestProfile: { profile: ["stable", "fast", "high"] },
           listScopes: {}, listBoards: { query: "可选，版面名称或 ID" },
           startSearch: {
             query: "必填，支持页面现有搜索语法", mode: ["online（默认）", "local"],
@@ -184,11 +185,25 @@ globalThis.ByrAgent = (() => {
         requireReady();
         return { context: adapter.context ? adapter.context() : { status: status() } };
       }),
+      getResourceUsage: guarded(() => {
+        requireReady();
+        return { resources: adapter.resources ? adapter.resources() : {} };
+      }),
+      getFailures: guarded(() => {
+        requireReady();
+        return { failures: adapter.failures ? adapter.failures() : [] };
+      }),
       previewSearch: guarded((input = {}) => {
         requireReady();
         const options = normalizeOptions(input);
         const prepared = adapter.prepare(options, false);
         return { preview: adapter.preview ? adapter.preview(prepared, options) : { mode: prepared.mode, boards: prepared.boards } };
+      }),
+      setRequestProfile: guarded((options = {}) => {
+        object(options, ["profile"]);
+        if (typeof options.profile !== "string" || !["stable", "fast", "high"].includes(options.profile)) invalid("请求预设只能是 stable、fast 或 high");
+        requireReady();
+        return { request: adapter.setRequestProfile ? adapter.setRequestProfile(options.profile) : { profile: options.profile } };
       }),
       listScopes: guarded(() => { requireReady(); return { scopes: adapter.scopes() }; }),
       listBoards: guarded((options = {}) => {

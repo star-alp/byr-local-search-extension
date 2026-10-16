@@ -1,0 +1,23 @@
+# 邮人全搜扩展：在主要桌面系统上运行核心逻辑回归测试。
+name: Extension CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 运行核心测试
+        run: node --test tests/search.test.cjs

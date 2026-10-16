@@ -23,6 +23,7 @@ const BOARD_SELECTION_STORAGE_KEY = "byr-search-board-selection";
 const INDEX_OPTIONS_STORAGE_KEY = "byr-search-index-options";
 const SCOPE_PRESETS_STORAGE_KEY = "byr-search-scope-presets";
 const SEARCH_HISTORY_STORAGE_KEY = "byr-search-history";
+const LANGUAGE_STORAGE_KEY = "byr-search-language";
 const SEARCH_SESSIONS_MAX = 20;
 const INDEX_METADATA_STORAGE_KEY = "byr-search-index-metadata";
 const INDEX_COVERAGE_STORAGE_KEY = "byr-search-index-coverage";
@@ -68,6 +69,7 @@ const state = {
   indexActiveWorkers: 0,
   onlineActiveWorkers: 0,
   requestPreset: DEFAULT_REQUEST_PRESET,
+  language: "zh-CN",
   requestConcurrency: DEFAULT_REQUEST_CONCURRENCY,
   requestDelayMs: DEFAULT_REQUEST_DELAY_MS,
   lastRequestStartedAt: 0,
@@ -138,6 +140,21 @@ function loadSavedIndexOptions() {
   $("#index-board-pages").disabled = $("#index-board-all").checked;
   $("#index-thread-pages").disabled = $("#index-thread-all").checked;
   $("#index-custom-dates").hidden = $("#index-time-range").value !== "custom";
+}
+
+function loadLanguage() {
+  const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY) || "zh-CN";
+  state.language = ForumClient.setLanguage(saved);
+  const select = $("#language-select");
+  if (select) select.value = state.language;
+}
+
+function saveLanguage(language) {
+  state.language = ForumClient.setLanguage(language);
+  localStorage.setItem(LANGUAGE_STORAGE_KEY, state.language);
+  const select = $("#language-select");
+  if (select) select.value = state.language;
+  showToast(state.language === "zh-en" ? "提示语言已切换为中文 / English" : `提示语言已切换为 ${ForumClient.supportedLanguages().find((item) => item.id === state.language)?.label || state.language}`);
 }
 
 function indexOptionValues() {
@@ -875,7 +892,7 @@ function agentPageUrl() {
 }
 
 function buildAgentPrompt() {
-  return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n推荐连接方式：本地 Agent Bridge\n1. 官方 Bridge/CLI 仓库：https://github.com/star-alp/byr-local-search-bridge。Bridge 只监听本机 127.0.0.1，不读取密码、Cookie，也不接收完整正文。\n2. 先检查当前工作目录是否已有 byr-local-search-bridge；如果没有，先克隆该公开仓库并进入目录。不要临时生成未经确认的桥接程序。\n3. 在 Bridge 仓库目录执行：node agent-cli.mjs setup --url "${agentPageUrl()}"。该命令会自动启动 Bridge、生成并保存本地令牌、打开正确的扩展页面；不要让用户手动填写端口或令牌。\n4. 执行 node agent-cli.mjs doctor，确认 Bridge、扩展和 Agent API 均已连接。若未连接，根据中文诊断继续处理，并在需要时刷新扩展页面；如果打开了错误的 Chrome 用户配置，应改为打开安装了邮人全搜的用户配置。\n5. 用户提出搜索需求后，优先执行：node agent-cli.mjs ask --query "<用户关键词>" --scope last-used --limit 20 --pretty。该命令会自动启动在线搜索、等待结果并返回结构化结果；需要边搜索边接收结果时加 --stream。用户没有指定范围时使用 last-used；需要版面或范围时先调用 boards 或 scopes。\n6. 开始大范围搜索前可以执行 node agent-cli.mjs preview --query "<用户关键词>"，查看版面、页数和最低请求量；需要了解当前任务、登录状态和资源占用时执行 node agent-cli.mjs context。\n7. 搜索过程中可用 pause、resume、retry 配合 --search-id 暂停、继续或只重试失败请求；先通过 status 或 context 获取当前 searchId。返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n只有 CLI 无法完成任务时，才调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__ 的 getCapabilities()、getContext()、previewSearch()、startSearch()、getStatus()、getResults() 和任务控制方法进行诊断。不要使用截图或反复点击页面代替 Agent API。\n\n备用连接方式：Chrome DevTools Protocol。只有用户明确允许使用专用调试 Chrome 时，才使用 9222 端口和 agent-cli.mjs；不要尝试接管用户正在运行的普通 Chrome。\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
+  return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n推荐连接方式：本地 Agent Bridge\n1. 官方 Bridge/CLI 仓库：https://github.com/star-alp/byr-local-search-bridge。Bridge 只监听本机 127.0.0.1，不读取密码、Cookie，也不接收完整正文。\n2. 先检查当前工作目录是否已有 byr-local-search-bridge；如果没有，先克隆该公开仓库并进入目录。不要临时生成未经确认的桥接程序。\n3. 在 Bridge 仓库目录执行：node agent-cli.mjs setup --url "${agentPageUrl()}"。该命令会自动启动 Bridge、生成并保存本地令牌、打开正确的扩展页面；不要让用户手动填写端口或令牌。\n4. 执行 node agent-cli.mjs doctor，确认 Bridge、扩展和 Agent API 均已连接。若未连接，根据中文诊断继续处理，并在需要时刷新扩展页面；如果打开了错误的 Chrome 用户配置，应改为打开安装了邮人全搜的用户配置。\n5. 用户提出搜索需求后，优先执行：node agent-cli.mjs ask --query "<用户关键词>" --scope last-used --limit 20 --pretty。该命令会自动启动在线搜索、等待结果并返回结构化结果；需要边搜索边接收结果时加 --stream。用户没有指定范围时使用 last-used；需要版面或范围时先调用 boards 或 scopes。\n6. 开始大范围搜索前可以执行 node agent-cli.mjs preview --query "<用户关键词>"，查看版面、页数和最低请求量；需要了解当前任务、登录状态和资源占用时执行 node agent-cli.mjs context 或 resources；需要查看失败请求时执行 failures。\n7. 搜索过程中可用 pause、resume、retry 配合 --search-id 暂停、继续或只重试失败请求；先通过 status 或 context 获取当前 searchId。请求强度只能通过 request-profile 选择 stable、fast、high。返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n只有 CLI 无法完成任务时，才调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__ 的 getCapabilities()、getContext()、previewSearch()、startSearch()、getStatus()、getResults() 和任务控制方法进行诊断。不要使用截图或反复点击页面代替 Agent API。\n\n备用连接方式：Chrome DevTools Protocol。只有用户明确允许使用专用调试 Chrome 时，才使用 9222 端口和 agent-cli.mjs；不要尝试接管用户正在运行的普通 Chrome。\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
 }
 
 async function copyText(value) {
@@ -2848,6 +2865,7 @@ function bindEvents() {
   $("#request-concurrency").addEventListener("blur", normalizePerformanceInput);
   $("#request-delay").addEventListener("blur", normalizePerformanceInput);
   $("#refresh-resources").addEventListener("click", () => refreshResourceUsage().catch((error) => showToast(error.message || "资源统计失败")));
+  $("#language-select").addEventListener("change", (event) => saveLanguage(event.target.value));
   $("#save-online-results").addEventListener("click", () => saveOnlineResults());
   $("#save-search-session").addEventListener("click", () => saveSearchSession());
   $("#board-select").addEventListener("change", updateBoardSelectionStatus);
@@ -2922,6 +2940,24 @@ function bindEvents() {
   }));
 }
 
+const AGENT_ERROR_MESSAGES = Object.freeze({
+  BUSY: { "zh-CN": "当前任务正在运行，请等待完成或先停止搜索", en: "A task is already running. Wait for it to finish or stop it first." },
+  SETTINGS_OPEN: { "zh-CN": "请先关闭更多设置窗口", en: "Close the More settings window first." },
+  CONFIRMATION_REQUIRED: { "zh-CN": "存在暂停的在线任务；替换进度前请先确认", en: "A paused online task exists. Confirm before replacing its progress." },
+  NO_BOARDS: { "zh-CN": "请先登录论坛并读取版面，然后选择至少一个版面", en: "Log in to the forum, load the boards, and select at least one board first." },
+  SCOPE_NOT_FOUND: { "zh-CN": "找不到指定的常用范围，请先读取可用范围", en: "The requested saved scope was not found. List available scopes first." },
+  BOARD_NOT_FOUND: { "zh-CN": "指定版面不存在或尚未加载", en: "The requested board does not exist or has not been loaded." },
+  INVALID_ARGUMENT: { "zh-CN": "参数无效，请检查搜索设置", en: "An argument is invalid. Check the search settings." },
+  INVALID_STATE: { "zh-CN": "当前没有可继续的在线搜索任务", en: "There is no online search task that can be resumed." },
+  NO_FAILED_JOBS: { "zh-CN": "当前搜索没有可重试的失败请求", en: "The current search has no failed requests to retry." },
+  STALE_SEARCH: { "zh-CN": "搜索标识已失效，请先读取当前状态", en: "The search ID is stale. Read the current status first." }
+});
+
+function agentUserMessage(error, fallback = "Agent 调用失败，请重试") {
+  if (AGENT_ERROR_MESSAGES[error?.code]) return ForumClient.localize(AGENT_ERROR_MESSAGES[error.code], fallback);
+  return ForumClient.userMessage(error, fallback);
+}
+
 function agentError(code, message) {
   return Object.assign(new Error(message), { code });
 }
@@ -2985,7 +3021,7 @@ function agentSearchView() {
         boardPages: metrics?.boardPages || 0, contentPages: metrics?.contentPages || 0, nativePages: metrics?.nativePages || 0,
         threads: metrics?.threads || 0, requestCount: task?.requests || 0, failures: metrics?.failures.length || 0, skipped: metrics?.skipped || 0
       },
-      error: task?.error ? { code: "TASK_PAUSED", message: ForumClient.userMessage(task.error) } : null
+      error: task?.error ? { code: "TASK_PAUSED", message: agentUserMessage(task.error) } : null
     }
   };
 }
@@ -2998,7 +3034,7 @@ function agentTaskContext(task) {
     mode: task.mode,
     phase: task.phase,
     pauseRequested: Boolean(task.pauseRequested),
-    error: task.error ? ForumClient.userMessage(task.error) : null,
+    error: task.error ? agentUserMessage(task.error) : null,
     progress: {
       scannedBoards: metrics.boards, totalBoards: metrics.boardTotal,
       boardPages: metrics.boardPages, contentPages: metrics.contentPages,
@@ -3035,6 +3071,7 @@ function agentContext() {
       intervalMs: state.requestDelayMs,
       activeWorkers: state.onlineActiveWorkers + state.indexActiveWorkers
     },
+    language: state.language,
     resources: {
       sessionPages: state.sessionPages.size,
       sessionCacheBytes: state.sessionCacheBytes
@@ -3105,8 +3142,45 @@ function retryAgentSearch() {
   running.catch((error) => showToast(error.message || "重试搜索失败"));
 }
 
+function agentResourceUsage() {
+  const payload = JSON.stringify({ documents: state.documents, boards: state.boards });
+  const memory = globalThis.performance?.memory;
+  return {
+    indexedDocuments: state.documents.length,
+    boards: state.boards.length,
+    indexBytes: new Blob([payload]).size,
+    requestCount: state.requestCount,
+    sessionPages: state.sessionPages.size,
+    sessionCacheBytes: state.sessionCacheBytes,
+    memory: memory ? { usedBytes: memory.usedJSHeapSize, limitBytes: memory.jsHeapSizeLimit } : null
+  };
+}
+
+function agentFailures() {
+  return Object.values(state.tasks).filter(Boolean).flatMap((task) => task.jobs.filter((job) => job.status === "failed").map((job) => ({
+    taskId: task.id,
+    mode: task.mode,
+    board: job.board?.name || "",
+    boardDescription: job.board?.description || "",
+    kind: job.kind,
+    page: job.page || 1,
+    topicId: job.post?.gid ? String(job.post.gid) : null,
+    message: ForumClient.userMessage(job.error, "论坛请求失败，请重试")
+  })));
+}
+
+function setAgentRequestProfile(profile) {
+  state.requestPreset = profile;
+  state.requestConcurrency = PERFORMANCE_PRESETS[profile].concurrency;
+  state.requestDelayMs = PERFORMANCE_PRESETS[profile].delayMs;
+  $("#request-speed").value = profile;
+  normalizePerformanceInput();
+  updatePerformanceConfig();
+  return { profile, concurrency: state.requestConcurrency, intervalMs: state.requestDelayMs };
+}
+
 const agentController = ByrAgent.create({
-  userMessage: (error) => ForumClient.userMessage(error, "Agent 调用失败，请重试"),
+  userMessage: agentUserMessage,
   prepare: prepareAgentSearch,
   configure: configureAgentSearch,
   async start(prepared, options) {
@@ -3121,6 +3195,9 @@ const agentController = ByrAgent.create({
   view: agentSearchView,
   context: agentContext,
   preview: agentPreview,
+  resources: agentResourceUsage,
+  failures: agentFailures,
+  setRequestProfile: setAgentRequestProfile,
   results() {
     const query = agentSearchView().status.query;
     // 程序接口返回独立的正文与回帖命中，不受页面分页、折叠和分类导航影响。
@@ -3146,6 +3223,7 @@ Object.defineProperty(globalThis, ByrAgent.GLOBAL_NAME, { value: agentController
 
 async function init() {
   bindEvents();
+  loadLanguage();
   loadPerformanceConfig();
   setDefaultCustomDates();
   loadSavedBoardSelection();

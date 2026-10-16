@@ -604,6 +604,9 @@ test("Agent 提供上下文、预览和可校验的任务控制接口", async ()
     view: () => ({ key: "same", source: "test", status: { mode: "online", query: "课程资料", running: phase === "running", status: phase } }),
     results: () => [],
     context: () => ({ connection: { ready: true }, request: { concurrency: 8 } }),
+    resources: () => ({ indexedDocuments: 12, indexBytes: 1024 }),
+    failures: () => [{ mode: "online", page: 2 }],
+    setRequestProfile: (profile) => ({ profile, concurrency: 8, intervalMs: 50 }),
     prepare: (options) => ({ ...options, mode: "online", boards: ["StudyShare"] }),
     preview: () => ({ boards: ["StudyShare"], requests: { fixedDiscoveryMaximum: 2 } }),
     start: async () => { phase = "running"; },
@@ -617,10 +620,30 @@ test("Agent 提供上下文、预览和可校验的任务控制接口", async ()
   assert.equal(started.ok, true);
   const searchId = started.searchId;
   assert.deepEqual(controller.api.getContext().context.request, { concurrency: 8 });
+  assert.equal(controller.api.getResourceUsage().resources.indexedDocuments, 12);
+  assert.equal(controller.api.getFailures().failures[0].page, 2);
+  assert.equal(controller.api.setRequestProfile({ profile: "high" }).request.profile, "high");
   assert.equal(controller.api.previewSearch({ query: "课程资料" }).preview.requests.fixedDiscoveryMaximum, 2);
   assert.equal(controller.api.pauseSearch({ searchId }).ok, true);
   assert.equal(controller.api.resumeSearch({ searchId }).ok, true);
   assert.equal(controller.api.retrySearch({ searchId }).ok, true);
   assert.deepEqual(calls, ["pause", "resume", "retry"]);
   assert.equal(controller.api.pauseSearch({ searchId: "stale" }).error.code, "STALE_SEARCH");
+});
+
+test("论坛错误提示支持中英双语和日、韩、俄语言切换", () => {
+  const { api } = page();
+  const client = api.ForumClient;
+  assert.equal([...client.supportedLanguages()].map((item) => item.id).join(","), "zh-CN,zh-en,en,ja,ko,ru");
+  client.setLanguage("zh-en");
+  const bilingual = client.userMessage({ code: "LOGIN_REQUIRED" });
+  assert.match(bilingual, /尚未登录论坛/u);
+  assert.match(bilingual, /You are not logged in/u);
+  client.setLanguage("ja");
+  assert.match(client.userMessage({ code: "NETWORK_ERROR" }), /ネットワーク/u);
+  client.setLanguage("ko");
+  assert.match(client.userMessage({ code: "RATE_LIMITED" }), /요청/u);
+  client.setLanguage("ru");
+  assert.match(client.userMessage({ code: "SERVER_BUSY" }), /Сервер/u);
+  client.setLanguage("zh-CN");
 });
