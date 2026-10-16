@@ -955,8 +955,7 @@ function renderIndexCoverage() {
   });
   const totalTopics = new Set(state.documents.filter((doc) => doc.gid).map((doc) => `${doc.board}:${doc.gid}`)).size;
   const latest = rows.reduce((value, item) => Math.max(value, item.lastCheckedAt), 0);
-  const completed = rows.filter((item) => state.selectedBoardNames.has(item.name) && item.status.kind === "complete").length;
-  $("#index-coverage-summary").textContent = `${state.documents.length} 条内容 · 当前范围 ${completed}/${state.selectedBoardNames.size} 版面完成`;
+  $("#index-coverage-summary").textContent = `${state.documents.length} 条内容`;
   $("#index-coverage-summary").title = `${totalTopics} 个主题${latest ? ` · 最近 ${formatTime(latest)}` : ""}；状态按当前页数和日期范围判断`;
   $("#index-coverage-details").hidden = !rows.length;
   $("#index-coverage-list").innerHTML = rows.map((item) =>
@@ -1894,7 +1893,7 @@ function updateTaskStatus(task, active = 0) {
     + (task.error ? ` · ${ForumClient.userMessage(task.error)}` : "");
   const compact = task.mode === "online"
     ? `${phaseLabel} · 已找到 ${state.onlineDocuments.length} 条`
-    : `${labels[task.phase]} · 已读取 ${metrics.boardPages + metrics.contentPages} 页 · 已完成版面 ${metrics.boards}/${metrics.boardTotal}`;
+    : `${task.phase === "complete" ? "扫描完成" : labels[task.phase]} · 已读 ${metrics.boardPages + metrics.contentPages} 页 · 版面 ${metrics.boards}/${metrics.boardTotal}`;
   if (task.mode === "online") {
     state.onlineActiveWorkers = active;
     $("#online-search-status-summary").textContent = compact;

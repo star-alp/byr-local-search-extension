@@ -184,7 +184,7 @@ const scenario = String.raw`
   assert(!document.querySelector('#search-sessions').hidden && document.querySelector('#search-sessions-toggle').getAttribute('aria-expanded') === 'true', '工具栏中的会话按钮应能在下一行展开会话');
   document.querySelector('#search-sessions-toggle').click();
   assert(document.querySelector('#search-sessions').hidden, '再次点击会话按钮应收起内容');
-  assert(document.querySelector('#index-incremental').closest('.sidebar-details').textContent.includes('增量更新（只读取变化主题）'), '增量更新选项应在本地索引管理中清楚标识');
+  assert(document.querySelector('#index-incremental').closest('.sidebar-details').textContent.includes('增量更新'), '增量更新选项应在本地索引管理中清楚标识');
   const speed = document.querySelector('#request-speed');
   assert(speed.value === 'high' && state.requestConcurrency === 8 && state.requestDelayMs === 50, '请求速度默认应使用极速配置');
   speed.value = 'fast';
@@ -361,14 +361,13 @@ const scenario = String.raw`
   await startNewTask('index');
   assert(state.tasks.index.boards.length === 1 && state.tasks.index.options.boardPageLimit === 6, '侧栏修改应进入下一次任务，但不能覆盖已保存的预设');
   assert(state.scopePresets[0].options.boardPages === 1, '临时调整页数不能自动改写预设');
-  const indexDetails = document.querySelector('#index-status details');
-  indexDetails.open = false;
-  indexDetails.querySelector('summary').click();
-  assert(indexDetails.open, '索引查看详情应能展开');
+  const indexDetailsToggle = document.querySelector('#index-status-details-toggle');
+  indexDetailsToggle.click();
+  assert(indexDetailsToggle.getAttribute('aria-expanded') === 'true' && !document.querySelector('#index-status-details').hidden, '索引查看详情应能展开');
   updateTaskStatus(state.tasks.index, 0);
-  assert(indexDetails.open, '索引状态刷新不能强制折叠已展开的详情');
-  assert(document.querySelector('#index-status-summary').textContent.includes('已读取')
-    && document.querySelector('#index-status-summary').textContent.includes('已完成版面'), '索引主状态应同时显示已读取页数和完整完成版面');
+  assert(indexDetailsToggle.getAttribute('aria-expanded') === 'true' && !document.querySelector('#index-status-details').hidden, '索引状态刷新不能强制折叠已展开的详情');
+  assert(document.querySelector('#index-status-summary').textContent.includes('已读')
+    && document.querySelector('#index-status-summary').textContent.includes('版面'), '索引主状态应同时显示已读页数和版面进度');
   selectScopePreset(state.scopePresets[0].id);
   saved = await getAll('documents');
   assert(saved.some(doc => doc.gid === '99'), '小范围索引更新不能清掉历史');
