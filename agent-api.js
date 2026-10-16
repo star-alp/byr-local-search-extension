@@ -1,4 +1,4 @@
-/* 邮人全搜 Agent 协议第一版：供本机浏览器调试连接调用，提供能力发现、搜索和带游标的增量结果。 */
+/* 邮人全搜 Agent 协议第一版：供本机浏览器调试连接调用，提供上下文、预览、搜索控制和增量结果。 */
 
 globalThis.ByrAgent = (() => {
   const GLOBAL_NAME = "__BYR_LOCAL_SEARCH_AGENT_V1__";
@@ -131,6 +131,13 @@ globalThis.ByrAgent = (() => {
       return { ready, searchId: session.id, ...view.status, found: session.current.size, revision: session.revision, startup };
     }
 
+    function currentSearch(options = {}) {
+      object(options, ["searchId"]);
+      const view = synchronize();
+      if (options.searchId !== session.id) invalid("搜索标识已失效，请先读取当前状态", "STALE_SEARCH");
+      return view;
+    }
+
     async function startSearch(input = {}) {
       if (starting) return failure(Object.assign(new Error("另一条搜索指令正在启动"), { code: "BUSY" }));
       starting = true;
@@ -149,7 +156,8 @@ globalThis.ByrAgent = (() => {
       getCapabilities: guarded(() => ({
         name: "邮人全搜", globalName: GLOBAL_NAME, transport: "Chrome DevTools Protocol / 本地 Agent Bridge", ready,
         methods: {
-          getCapabilities: {}, getStatus: {}, listScopes: {}, listBoards: { query: "可选，版面名称或 ID" },
+          getCapabilities: {}, getStatus: {}, getContext: {}, previewSearch: { description: "与 startSearch 参数相同，仅评估范围和请求量" },
+          listScopes: {}, listBoards: { query: "可选，版面名称或 ID" },
           startSearch: {
             query: "必填，支持页面现有搜索语法", mode: ["online（默认）", "local"],
             scope: ["last-used（默认）", "recommended", "saved:<范围 ID>"], boards: "可选，版面 ID 数组，与 scope 互斥",
@@ -159,7 +167,10 @@ globalThis.ByrAgent = (() => {
             confirm: "默认 false；替换暂停任务须显式设为 true"
           },
           getResults: { cursor: "可选；原样传入上次返回的 nextCursor", limit: "1～100，默认 20" },
-          cancelSearch: { searchId: "必填；只停止当前在线搜索，保留进度和结果" }
+          pauseSearch: { searchId: "必填；暂停当前搜索并保留进度" },
+          resumeSearch: { searchId: "必填；继续当前已暂停或部分完成的搜索" },
+          retrySearch: { searchId: "必填；只重试当前搜索失败的请求" },
+          cancelSearch: { searchId: "必填；兼容旧版本，效果等同于 pauseSearch" }
         },
         url: { activation: "agent=1&api=1", actions: ["configure（默认，仅填入参数）", "search（立即搜索）"], fields: URL_FIELDS,
           encoding: "使用 URLSearchParams 编码；boards 用逗号分隔；页数 all 对应 API 的 null；布尔值使用 0/1",
@@ -169,6 +180,16 @@ globalThis.ByrAgent = (() => {
         pollingIntervalMs: 1000, maxBatchSize: 100, additionalPermissions: false, bridge: { protocolVersion: 1, host: "127.0.0.1", extensionInitiatesConnection: true }
       })),
       getStatus: guarded(status),
+      getContext: guarded(() => {
+        requireReady();
+        return { context: adapter.context ? adapter.context() : { status: status() } };
+      }),
+      previewSearch: guarded((input = {}) => {
+        requireReady();
+        const options = normalizeOptions(input);
+        const prepared = adapter.prepare(options, false);
+        return { preview: adapter.preview ? adapter.preview(prepared, options) : { mode: prepared.mode, boards: prepared.boards } };
+      }),
       listScopes: guarded(() => { requireReady(); return { scopes: adapter.scopes() }; }),
       listBoards: guarded((options = {}) => {
         requireReady(); object(options, ["query"]);
@@ -194,10 +215,23 @@ globalThis.ByrAgent = (() => {
         const revision = items.at(-1)?.sequence ?? since;
         return { searchId: session.id, items, total: session.current.size, nextCursor: `${session.id}:${revision}`, hasMore: changes.length > limit, running: view.status.running, status: view.status.status };
       }),
+      pauseSearch: guarded((options = {}) => {
+        currentSearch(options);
+        adapter.pause();
+        return status();
+      }),
+      resumeSearch: guarded((options = {}) => {
+        currentSearch(options);
+        adapter.resume();
+        return status();
+      }),
+      retrySearch: guarded((options = {}) => {
+        currentSearch(options);
+        adapter.retry();
+        return status();
+      }),
       cancelSearch: guarded((options = {}) => {
-        object(options, ["searchId"]);
-        synchronize();
-        if (options.searchId !== session.id) invalid("搜索标识已失效，请先读取当前状态", "STALE_SEARCH");
+        currentSearch(options);
         adapter.cancel();
         return status();
       })

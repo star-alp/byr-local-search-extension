@@ -875,7 +875,7 @@ function agentPageUrl() {
 }
 
 function buildAgentPrompt() {
-  return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n推荐连接方式：本地 Agent Bridge\n1. 官方 Bridge/CLI 仓库：https://github.com/star-alp/byr-local-search-bridge。Bridge 只监听本机 127.0.0.1，不读取密码、Cookie，也不接收完整正文。\n2. 先检查当前工作目录是否已有 byr-local-search-bridge；如果没有，先克隆该公开仓库并进入目录。不要临时生成未经确认的桥接程序。\n3. 在 Bridge 仓库目录执行：node agent-cli.mjs setup --url "${agentPageUrl()}"。该命令会自动启动 Bridge、生成并保存本地令牌、打开正确的扩展页面；不要让用户手动填写端口或令牌。\n4. 执行 node agent-cli.mjs doctor，确认 Bridge、扩展和 Agent API 均已连接。若未连接，根据中文诊断继续处理，并在需要时刷新扩展页面；如果打开了错误的 Chrome 用户配置，应改为打开安装了邮人全搜的用户配置。\n5. 用户提出搜索需求后，优先执行：node agent-cli.mjs ask --query "<用户关键词>" --scope last-used --limit 20 --pretty。该命令会自动启动在线搜索、等待结果并返回结构化结果。用户没有指定范围时使用 last-used；需要版面或范围时先调用 boards 或 scopes。\n6. 返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n只有 setup/doctor/ask 无法完成任务时，才调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__ 的 getCapabilities()、startSearch()、getStatus() 和 getResults() 进行诊断。不要使用截图或反复点击页面代替 Agent API。\n\n备用连接方式：Chrome DevTools Protocol。只有用户明确允许使用专用调试 Chrome 时，才使用 9222 端口和 agent-cli.mjs；不要尝试接管用户正在运行的普通 Chrome。\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
+  return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n推荐连接方式：本地 Agent Bridge\n1. 官方 Bridge/CLI 仓库：https://github.com/star-alp/byr-local-search-bridge。Bridge 只监听本机 127.0.0.1，不读取密码、Cookie，也不接收完整正文。\n2. 先检查当前工作目录是否已有 byr-local-search-bridge；如果没有，先克隆该公开仓库并进入目录。不要临时生成未经确认的桥接程序。\n3. 在 Bridge 仓库目录执行：node agent-cli.mjs setup --url "${agentPageUrl()}"。该命令会自动启动 Bridge、生成并保存本地令牌、打开正确的扩展页面；不要让用户手动填写端口或令牌。\n4. 执行 node agent-cli.mjs doctor，确认 Bridge、扩展和 Agent API 均已连接。若未连接，根据中文诊断继续处理，并在需要时刷新扩展页面；如果打开了错误的 Chrome 用户配置，应改为打开安装了邮人全搜的用户配置。\n5. 用户提出搜索需求后，优先执行：node agent-cli.mjs ask --query "<用户关键词>" --scope last-used --limit 20 --pretty。该命令会自动启动在线搜索、等待结果并返回结构化结果；需要边搜索边接收结果时加 --stream。用户没有指定范围时使用 last-used；需要版面或范围时先调用 boards 或 scopes。\n6. 开始大范围搜索前可以执行 node agent-cli.mjs preview --query "<用户关键词>"，查看版面、页数和最低请求量；需要了解当前任务、登录状态和资源占用时执行 node agent-cli.mjs context。\n7. 搜索过程中可用 pause、resume、retry 配合 --search-id 暂停、继续或只重试失败请求；先通过 status 或 context 获取当前 searchId。返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n只有 CLI 无法完成任务时，才调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__ 的 getCapabilities()、getContext()、previewSearch()、startSearch()、getStatus()、getResults() 和任务控制方法进行诊断。不要使用截图或反复点击页面代替 Agent API。\n\n备用连接方式：Chrome DevTools Protocol。只有用户明确允许使用专用调试 Chrome 时，才使用 9222 端口和 agent-cli.mjs；不要尝试接管用户正在运行的普通 Chrome。\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
 }
 
 async function copyText(value) {
@@ -2990,6 +2990,121 @@ function agentSearchView() {
   };
 }
 
+function agentTaskContext(task) {
+  if (!task) return null;
+  const metrics = ByrTasks.metrics(task);
+  return {
+    id: task.id,
+    mode: task.mode,
+    phase: task.phase,
+    pauseRequested: Boolean(task.pauseRequested),
+    error: task.error ? ForumClient.userMessage(task.error) : null,
+    progress: {
+      scannedBoards: metrics.boards, totalBoards: metrics.boardTotal,
+      boardPages: metrics.boardPages, contentPages: metrics.contentPages,
+      nativePages: metrics.nativePages, threads: metrics.threads,
+      requests: task.requests || 0, failures: metrics.failures.length,
+      skipped: metrics.skipped
+    }
+  };
+}
+
+function agentContext() {
+  const query = state.onlineQuery || $("#query-input").value.trim();
+  return {
+    connection: {
+      label: $("#login-state")?.textContent || "未知",
+      ready: typeof $("#login-state")?.classList?.contains === "function" && $("#login-state").classList.contains("is-ready")
+    },
+    search: {
+      mode: state.searchMode,
+      query,
+      selectedBoards: [...state.selectedBoardNames],
+      activeScopeId: state.activeScopeId,
+      onlineResults: state.onlineDocuments.length,
+      localResults: state.documents.length
+    },
+    index: {
+      documents: state.documents.length,
+      coverageBoards: Object.keys(state.indexCoverage).length,
+      metadataEntries: Object.keys(state.indexMetadata).length
+    },
+    request: {
+      preset: state.requestPreset,
+      concurrency: state.requestConcurrency,
+      intervalMs: state.requestDelayMs,
+      activeWorkers: state.onlineActiveWorkers + state.indexActiveWorkers
+    },
+    resources: {
+      sessionPages: state.sessionPages.size,
+      sessionCacheBytes: state.sessionCacheBytes
+    },
+    tasks: {
+      online: agentTaskContext(state.tasks.online),
+      index: agentTaskContext(state.tasks.index)
+    }
+  };
+}
+
+function agentPreview(prepared, options) {
+  const values = readIndexOptions(prepared.values);
+  const boardCount = prepared.boards.length;
+  const boardPageMaximum = values.boardPageLimit === null ? null : boardCount * values.boardPageLimit;
+  const nativePageCount = prepared.mode === "online"
+    ? prepared.boards.reduce((total, name) => total + nativeSearchPaths(name, prepared.query || "", values).length, 0)
+    : 0;
+  const knownTopics = new Set();
+  state.sessionPages.forEach((entry, path) => {
+    const match = path.match(/^\/n\/b\/board\/([^/]+)\.json\?page=/u);
+    if (!match) return;
+    const board = decodeURIComponent(match[1]);
+    if (!prepared.boards.includes(board)) return;
+    boardPosts(entry.result?.data).forEach((post) => knownTopics.add(`${board}:${post.gid}`));
+  });
+  const knownContentPageMaximum = values.threadPageLimit === null ? null : knownTopics.size * values.threadPageLimit;
+  const fixedMaximum = nativePageCount + (boardPageMaximum ?? 0);
+  return {
+    mode: prepared.mode,
+    query: prepared.query || "",
+    scopeId: prepared.scopeId,
+    boards: prepared.boards,
+    boardCount,
+    options: {
+      boardPages: values.boardPageLimit,
+      threadPages: values.threadPageLimit,
+      timeRange: prepared.values.timeRange,
+      dateFrom: prepared.values.dateFrom || null,
+      dateTo: prepared.values.dateTo || null
+    },
+    requests: {
+      nativeSearchPages: nativePageCount,
+      boardPagesMaximum: boardPageMaximum,
+      knownTopicCount: knownTopics.size,
+      knownContentPagesMaximum: knownContentPageMaximum,
+      fixedDiscoveryMaximum: values.boardPageLimit === null ? null : fixedMaximum,
+      contentPagesAreDynamic: true,
+      note: "主题数量和每个主题的实际页数由论坛返回，扫描前无法精确估算"
+    },
+    requestProfile: { preset: state.requestPreset, concurrency: state.requestConcurrency, intervalMs: state.requestDelayMs },
+    persist: Boolean(options.persist)
+  };
+}
+
+function resumeAgentSearch() {
+  const task = state.tasks.online;
+  if (!task || !["paused", "partial"].includes(task.phase)) throw agentError("INVALID_STATE", "当前没有可继续的在线搜索任务");
+  const running = continueTask("online");
+  running.catch((error) => showToast(error.message || "继续搜索失败"));
+}
+
+function retryAgentSearch() {
+  const task = state.tasks.online;
+  if (!task) throw agentError("INVALID_STATE", "当前没有在线搜索任务");
+  if (!task.jobs.some((job) => job.status === "failed")) throw agentError("NO_FAILED_JOBS", "当前搜索没有可重试的失败请求");
+  const running = continueTask("online", true);
+  running.catch((error) => showToast(error.message || "重试搜索失败"));
+}
+
 const agentController = ByrAgent.create({
   userMessage: (error) => ForumClient.userMessage(error, "Agent 调用失败，请重试"),
   prepare: prepareAgentSearch,
@@ -3004,6 +3119,8 @@ const agentController = ByrAgent.create({
     }
   },
   view: agentSearchView,
+  context: agentContext,
+  preview: agentPreview,
   results() {
     const query = agentSearchView().status.query;
     // 程序接口返回独立的正文与回帖命中，不受页面分页、折叠和分类导航影响。
@@ -3020,6 +3137,9 @@ const agentController = ByrAgent.create({
     ...[scopePreset("recommended"), ...state.scopePresets].map((preset) => ({ ...preset, id: preset.id === "recommended" ? preset.id : `saved:${preset.id}` }))
   ],
   boards: (query) => state.boards.filter((board) => `${board.name} ${board.description}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map((board) => ({ id: board.name, name: board.description, selected: state.selectedBoardNames.has(board.name) })),
+  pause: () => pauseTask("online"),
+  resume: resumeAgentSearch,
+  retry: retryAgentSearch,
   cancel: () => pauseTask("online")
 });
 Object.defineProperty(globalThis, ByrAgent.GLOBAL_NAME, { value: agentController.api });

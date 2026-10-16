@@ -594,3 +594,33 @@ test("Agent 能力说明不会暴露完整正文或账号凭据", () => {
   assert.ok(response.methods.startSearch);
   assert.ok(response.url.fields.includes("scope"));
 });
+
+test("Agent 提供上下文、预览和可校验的任务控制接口", async () => {
+  const { context } = page();
+  let phase = "paused";
+  const calls = [];
+  const controller = context.ByrAgent.create({
+    userMessage: (error) => error.message,
+    view: () => ({ key: "same", source: "test", status: { mode: "online", query: "课程资料", running: phase === "running", status: phase } }),
+    results: () => [],
+    context: () => ({ connection: { ready: true }, request: { concurrency: 8 } }),
+    prepare: (options) => ({ ...options, mode: "online", boards: ["StudyShare"] }),
+    preview: () => ({ boards: ["StudyShare"], requests: { fixedDiscoveryMaximum: 2 } }),
+    start: async () => { phase = "running"; },
+    pause: () => { calls.push("pause"); phase = "paused"; },
+    resume: () => { calls.push("resume"); phase = "running"; },
+    retry: () => { calls.push("retry"); phase = "running"; },
+    cancel: () => { calls.push("cancel"); phase = "paused"; }
+  });
+  await controller.initialize("");
+  const started = await controller.api.startSearch({ query: "课程资料" });
+  assert.equal(started.ok, true);
+  const searchId = started.searchId;
+  assert.deepEqual(controller.api.getContext().context.request, { concurrency: 8 });
+  assert.equal(controller.api.previewSearch({ query: "课程资料" }).preview.requests.fixedDiscoveryMaximum, 2);
+  assert.equal(controller.api.pauseSearch({ searchId }).ok, true);
+  assert.equal(controller.api.resumeSearch({ searchId }).ok, true);
+  assert.equal(controller.api.retrySearch({ searchId }).ok, true);
+  assert.deepEqual(calls, ["pause", "resume", "retry"]);
+  assert.equal(controller.api.pauseSearch({ searchId: "stale" }).error.code, "STALE_SEARCH");
+});
