@@ -129,7 +129,9 @@ const scenario = String.raw`
   const savedQuery = historyInput.value;
   assert(historyPopup.hidden && historyPopup.tagName !== 'DETAILS', '最近搜索默认不占页面空间，也不再使用折叠行');
   assert(!document.querySelector('#search-mode-description') && document.querySelector('.search-mode-row .query-help'), '搜索语法说明应移到模式切换右侧');
+  assert(!document.querySelector('#board-mode-hint') && document.querySelector('.board-picker').getAttribute('aria-label') === '版面选择列表' && document.querySelector('#refresh-boards').closest('.board-actions-row') && document.querySelector('#login-state').closest('.board-heading-row'), '版面说明应删除，刷新按钮和连接状态应移动到指定位置');
   assert(document.querySelector('#search-sessions-toggle').closest('#settings-preferences-panel') && document.querySelector('#save-online-results').closest('#settings-preferences-panel') && !document.querySelector('.search-panel #search-sessions-toggle'), '保存结果和保存会话应迁移到左侧侧边栏');
+  assert(document.querySelector('#save-online-results').classList.contains('compact-action') && document.querySelector('#save-search-session').classList.contains('compact-action'), '保存按钮应使用紧凑常规字重样式');
   state.searchHistory = [
     { query: '课程资料', mode: 'local' },
     { query: '课程安排', mode: 'local' },

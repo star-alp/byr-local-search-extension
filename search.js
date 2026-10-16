@@ -1447,7 +1447,6 @@ function setBoardPickerMode(mode) {
   $("#board-review-view").classList.toggle("is-active", !selecting);
   $("#board-select-view").setAttribute("aria-hidden", String(!selecting));
   $("#board-review-view").setAttribute("aria-hidden", String(selecting));
-  $("#board-mode-hint").textContent = selecting ? "按分区勾选需要搜索的版面" : "从大列表检查已经勾选的版面";
   renderFlatBoardList();
   renderBoardPicker();
 }
