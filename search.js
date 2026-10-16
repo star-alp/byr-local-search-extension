@@ -147,6 +147,7 @@ function loadLanguage() {
   state.language = ForumClient.setLanguage(saved);
   const select = $("#language-select");
   if (select) select.value = state.language;
+  globalThis.ByrUiI18n?.apply(document, state.language);
 }
 
 function saveLanguage(language) {
@@ -154,7 +155,17 @@ function saveLanguage(language) {
   localStorage.setItem(LANGUAGE_STORAGE_KEY, state.language);
   const select = $("#language-select");
   if (select) select.value = state.language;
-  showToast(state.language === "zh-en" ? "提示语言已切换为中文 / English" : `提示语言已切换为 ${ForumClient.supportedLanguages().find((item) => item.id === state.language)?.label || state.language}`);
+  globalThis.ByrUiI18n?.apply(document, state.language);
+  const label = ForumClient.supportedLanguages().find((item) => item.id === state.language)?.label || state.language;
+  const messages = {
+    "zh-CN": `提示语言已切换为 ${label}`,
+    "zh-en": `提示语言已切换为中文 / English`,
+    en: `Message language changed to ${label}`,
+    ja: `メッセージ言語を${label}に変更しました`,
+    ko: `메시지 언어가 ${label}(으)로 변경되었습니다`,
+    ru: `Язык сообщений изменён на ${label}`
+  };
+  showToast(messages[state.language] || messages["zh-CN"]);
 }
 
 function indexOptionValues() {
