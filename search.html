@@ -21,6 +21,31 @@
     </div>
   </header>
 
+  <dialog id="agent-help-dialog" class="agent-help-dialog" hidden aria-labelledby="agent-help-title">
+    <div class="settings-heading">
+      <h2 id="agent-help-title">AI 协助</h2>
+      <button id="close-agent-help" class="text-button" type="button" aria-label="关闭 AI 协助">关闭</button>
+    </div>
+    <div class="agent-help-body">
+      <div class="agent-help-lead">
+        <strong>让支持终端的 AI 帮你操作扩展</strong>
+        <p>你只需要把提示词交给 Codex、Claude Code、Trae 或 WorkBuddy。AI 会自动连接浏览器、启动搜索并返回结果。</p>
+      </div>
+      <ol class="agent-help-steps">
+        <li>先确保已经登录北邮人论坛。</li>
+        <li>点击下面的“复制给 AI”，粘贴到你的本地 AI 对话中。</li>
+        <li>之后直接对 AI 说出搜索需求，不需要再填写端口或令牌。</li>
+      </ol>
+      <div class="agent-help-command"><span>AI 将自动执行</span><code id="agent-help-command">node agent-cli.mjs setup --url "扩展页面"</code></div>
+      <div class="agent-help-connection"><span>当前连接</span><strong id="agent-help-connection">Agent 未连接</strong></div>
+      <div class="agent-help-actions">
+        <button id="copy-agent-prompt" class="button button-primary" type="button">复制给 AI</button>
+        <button id="agent-help-close-secondary" class="button button-secondary" type="button">我知道了</button>
+      </div>
+      <p class="field-help">连接器只监听本机，扩展不保存论坛密码或 Cookie。AI 搜索仍会遵守当前版面和读取范围。</p>
+    </div>
+  </dialog>
+
   <main id="app-layout" class="layout">
     <dialog id="search-settings" class="settings-dialog" hidden aria-labelledby="settings-title">
       <div class="settings-heading">
@@ -203,7 +228,7 @@
         </div>
       </details>
 
-      <div class="panel-section settings-entry"><button id="open-settings" class="text-button" type="button" aria-haspopup="dialog" aria-controls="search-settings">更多设置</button><button id="copy-agent-prompt" class="text-button" type="button">复制 Agent 提示词</button><span id="agent-bridge-status" class="agent-bridge-status" aria-live="polite">Agent 未连接</span></div>
+      <div class="panel-section settings-entry"><button id="open-settings" class="text-button" type="button" aria-haspopup="dialog" aria-controls="search-settings">更多设置</button><button id="open-agent-help" class="text-button ai-help-link" type="button" aria-haspopup="dialog" aria-controls="agent-help-dialog">AI 协助</button><span id="agent-bridge-status" class="agent-bridge-status" aria-live="polite">Agent 未连接</span></div>
     </aside>
 
     <section class="search-panel">

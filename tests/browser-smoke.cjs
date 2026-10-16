@@ -299,6 +299,11 @@ const scenario = String.raw`
     assert(state.scopePresets.length === 2 && state.documents.length === 2, '删除范围不能删除索引内容');
     assert(!document.querySelector('.sidebar-heading'), '没有功能的搜索设置标题应移除');
     assert(document.querySelector('#clear-index').closest('#search-settings') && document.querySelector('#refresh-resources').closest('#search-settings'), '隐私与资源应迁入弹窗');
+    document.querySelector('#open-agent-help').click();
+    assert(document.querySelector('#agent-help-dialog').matches(':modal') && document.querySelector('#app-layout').inert, 'AI 协助应打开独立模态向导并阻止主界面');
+    assert(document.querySelector('#agent-help-command').textContent.includes('agent-cli.mjs setup'), 'AI 协助应显示自动连接命令');
+    document.querySelector('#agent-help-close-secondary').click();
+    assert(document.querySelector('#agent-help-dialog').hidden && !document.querySelector('#app-layout').inert, '关闭 AI 协助后应恢复主界面');
     document.querySelector('#open-settings').click();
     assert(document.querySelector('#search-settings').matches(':modal'), '更多设置入口应打开模态弹窗');
     document.querySelector('#search-settings').dispatchEvent(new Event('cancel', { cancelable: true }));

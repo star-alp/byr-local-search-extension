@@ -95,6 +95,7 @@ const state = {
   settingsBackgroundTargets: [],
   settingsGuardBound: false,
   settingsScrollState: null,
+  activeModal: null,
   coverageRenderTimer: null,
   suppressPreferenceWrites: false
 };
@@ -874,7 +875,7 @@ function agentPageUrl() {
 }
 
 function buildAgentPrompt() {
-  return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n推荐连接方式：本地 Agent Bridge\n1. Bridge 只监听本机 127.0.0.1，不读取密码、Cookie，也不接收完整正文。\n2. 官方 Bridge/CLI 仓库：https://github.com/star-alp/byr-local-search-bridge。需要安装时先向用户说明并获得确认，再从该仓库获取固定版本；不要临时生成未经确认的桥接程序。\n3. 在 Bridge 仓库目录运行：node agent-bridge.mjs start --port 17832 --token <令牌>。\n4. 启动 Bridge 后，使用它输出的端口和令牌，在扩展页面 URL 后增加 bridge=1、bridgePort=<端口>、bridgeToken=<令牌>，并在用户常用 Chrome 中打开该地址。\n5. Bridge 连接成功后，调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__ 对应的 getCapabilities()、startSearch()、getStatus() 和 getResults()。CLI 示例：node agent-cli.mjs capabilities --transport bridge --port 17832 --token <令牌>。\n\n备用连接方式：Chrome DevTools Protocol\n如果用户明确允许使用专用调试 Chrome，才使用本地 9222 端口和 Bridge 仓库中的 agent-cli.mjs；不要尝试接管用户正在运行的普通 Chrome。\n\n调用流程：\n1. 先执行 getCapabilities()。\n2. 执行 startSearch({ query: "<关键词>", mode: "online", scope: "last-used" })。\n3. 使用 getStatus() 查看进度，使用 getResults({ cursor, limit }) 按游标读取新增结果，直到 running 为 false。\n4. 返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。\n5. 清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n备用 CDP 命令（在 Bridge 仓库目录运行）：\nnode agent-cli.mjs capabilities --port 9222 --url "${agentPageUrl()}"\nnode agent-cli.mjs search --port 9222 --url "${agentPageUrl()}" --query "<关键词>" --mode online --scope last-used --wait\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
+  return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n推荐连接方式：本地 Agent Bridge\n1. 官方 Bridge/CLI 仓库：https://github.com/star-alp/byr-local-search-bridge。Bridge 只监听本机 127.0.0.1，不读取密码、Cookie，也不接收完整正文。\n2. 在 Bridge 仓库目录执行：node agent-cli.mjs setup --url "${agentPageUrl()}"。该命令会自动启动 Bridge、生成并保存本地令牌、打开正确的扩展页面；不要让用户手动填写端口或令牌。\n3. 执行 node agent-cli.mjs doctor，确认 Bridge、扩展和 Agent API 均已连接。若未连接，根据中文诊断继续处理，并在需要时刷新扩展页面。\n4. 用户提出搜索需求后，优先执行：node agent-cli.mjs ask --query "<用户关键词>" --scope last-used --limit 20 --pretty。该命令会自动启动在线搜索、等待结果并返回结构化结果。用户没有指定范围时使用 last-used；需要版面或范围时先调用 boards 或 scopes。\n5. 返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n只有 setup/doctor/ask 无法完成任务时，才调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__ 的 getCapabilities()、startSearch()、getStatus() 和 getResults() 进行诊断。不要使用截图或反复点击页面代替 Agent API。\n\n备用连接方式：Chrome DevTools Protocol。只有用户明确允许使用专用调试 Chrome 时，才使用 9222 端口和 agent-cli.mjs；不要尝试接管用户正在运行的普通 Chrome。\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
 }
 
 async function copyText(value) {
@@ -1818,13 +1819,15 @@ function setSearchStatusPanel(panelId, open) {
   });
 }
 
-function setSettingsOpen(open) {
-  const dialog = $("#search-settings");
+function setModalOpen(dialog, open) {
   const layout = $("#app-layout");
   const setBackgroundBlocked = (blocked) => {
     if (blocked) {
+      if (state.activeModal && state.activeModal !== dialog) setModalOpen(state.activeModal, false);
       if (!state.settingsBackgroundTargets.length) {
-        const targets = [document.querySelector(".app-header"), ...[...layout.children].filter((item) => item !== dialog)].filter(Boolean);
+        const targets = [document.querySelector(".app-header"), ...(dialog.closest("#app-layout")
+          ? [...layout.children].filter((item) => item !== dialog)
+          : [layout])].filter(Boolean);
         state.settingsBackgroundTargets = targets.map((element) => ({
           element,
           inert: Boolean(element.inert),
@@ -1838,7 +1841,7 @@ function setSettingsOpen(open) {
       }
       if (!state.settingsGuardBound) {
         const preventBackgroundInteraction = (event) => {
-          if (!dialog.open || dialog.contains(event.target)) return;
+          if (!state.activeModal?.open || state.activeModal.contains(event.target)) return;
           if (event.type === "keydown" && event.key === "Escape") return;
           event.preventDefault();
           event.stopPropagation();
@@ -1862,6 +1865,7 @@ function setSettingsOpen(open) {
         document.documentElement.style.overflow = "hidden";
         document.body.style.overflow = "hidden";
       }
+      state.activeModal = dialog;
       return;
     }
     state.settingsBackgroundTargets.forEach(({ element, inert, ariaHidden }) => {
@@ -1876,6 +1880,7 @@ function setSettingsOpen(open) {
       document.body.style.overflow = state.settingsScrollState.body;
       state.settingsScrollState = null;
     }
+    if (state.activeModal === dialog) state.activeModal = null;
   };
   if (open) {
     dialog.hidden = false;
@@ -1886,6 +1891,22 @@ function setSettingsOpen(open) {
     dialog.hidden = true;
     setBackgroundBlocked(false);
   }
+}
+
+function setSettingsOpen(open) {
+  setModalOpen($("#search-settings"), open);
+}
+
+function setAgentHelpOpen(open) {
+  const dialog = $("#agent-help-dialog");
+  if (open) {
+    $("#agent-help-command").textContent = `node agent-cli.mjs setup --url "${agentPageUrl()}"`;
+    const status = $("#agent-bridge-status");
+    const helpStatus = $("#agent-help-connection");
+    helpStatus.textContent = status?.textContent || "Agent 未连接";
+    helpStatus.classList.toggle("is-connected", Boolean(status?.classList.contains("is-connected")));
+  }
+  setModalOpen(dialog, open);
 }
 
 function updateOnlineSearchControls() {
@@ -2729,9 +2750,13 @@ function bindEvents() {
   }, true);
   $("#fresh-online").addEventListener("click", () => startNewTask("online", true));
   $("#open-settings").addEventListener("click", () => setSettingsOpen(true));
+  $("#open-agent-help").addEventListener("click", () => setAgentHelpOpen(true));
   $("#copy-agent-prompt").addEventListener("click", copyAgentPrompt);
   $("#close-settings").addEventListener("click", () => setSettingsOpen(false));
   $("#search-settings").addEventListener("cancel", (event) => { event.preventDefault(); setSettingsOpen(false); });
+  $("#close-agent-help").addEventListener("click", () => setAgentHelpOpen(false));
+  $("#agent-help-close-secondary").addEventListener("click", () => setAgentHelpOpen(false));
+  $("#agent-help-dialog").addEventListener("cancel", (event) => { event.preventDefault(); setAgentHelpOpen(false); });
   $("#save-scope-preset").addEventListener("click", saveScopePreset);
   $("#delete-scope-preset").addEventListener("click", deleteScopePreset);
   $("#scope-preset-name").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); saveScopePreset(); } });
@@ -3035,6 +3060,11 @@ async function init() {
       if (!element) return;
       element.textContent = status === "已连接" ? "Agent 已连接" : `Agent ${status}`;
       element.classList.toggle("is-connected", status === "已连接");
+      const helpStatus = $("#agent-help-connection");
+      if (helpStatus) {
+        helpStatus.textContent = element.textContent;
+        helpStatus.classList.toggle("is-connected", status === "已连接");
+      }
     });
   }
 }
