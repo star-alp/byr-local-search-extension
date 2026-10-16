@@ -114,6 +114,11 @@ const scenario = String.raw`
   }
   document.documentElement.dataset.smoke = 'initializing';
   await init();
+  const agentApi = window.__BYR_LOCAL_SEARCH_AGENT_V1__;
+  const agentCapabilities = agentApi.getCapabilities();
+  assert(agentCapabilities.ok && agentCapabilities.apiVersion === 1 && agentCapabilities.results.fullContent === false, 'Agent API应在真实浏览器页面中初始化且不返回完整正文');
+  const agentStatus = agentApi.getStatus();
+  assert(agentStatus.ok && agentStatus.ready && ['idle', 'complete', 'paused'].includes(agentStatus.status), 'Agent API应返回当前页面的可用状态：' + JSON.stringify(agentStatus));
   if (!resume) {
     const notice = document.querySelector('#toast').textContent;
     assert(notice.includes('打开论坛登录') && !notice.includes("haven't login"), '未登录初始化时右下角必须显示中文登录指引');
@@ -596,7 +601,7 @@ const scenario = String.raw`
   assert(progressDetails.hidden && skippedPanel.hidden, '再次点击当前按钮应收起所有详情');
   state.tasks.online = previousTask;
   updateTaskStatus(previousTask);
-  const result = { ok: true, onlineHits: state.onlineDocuments.length, savedDocuments: saved.length, orQueries: true, cacheFindsPreviouslyUnmatched: true, cacheReducesRequests: true, cacheScopeProtected: true, cacheExpiry: true, forceRefresh: true, replyMatchesOwnFields: true, nativePagination: true, nativePageLimit: true, nativeRetryOnlyFailed: true, mixedTimeSort: true, checkpointRecovered: true, reopenedPageRecovered: true, retryWithoutRepeating: true, historyPreserved: true, privacyAndResourcesInDialog: true, searchContinuesInModal: true, explicitPresetSelection: true, rangeInSidebar: true, manualFirst: true, presetSkipsManualPicker: true, scopePresets: state.scopePresets.length, presetsRemainIndependent: true, taskScopeProtected: true, scopeFiltersLocal: true };
+  const result = { ok: true, onlineHits: state.onlineDocuments.length, savedDocuments: saved.length, orQueries: true, cacheFindsPreviouslyUnmatched: true, cacheReducesRequests: true, cacheScopeProtected: true, cacheExpiry: true, forceRefresh: true, replyMatchesOwnFields: true, nativePagination: true, nativePageLimit: true, nativeRetryOnlyFailed: true, mixedTimeSort: true, checkpointRecovered: true, reopenedPageRecovered: true, retryWithoutRepeating: true, historyPreserved: true, privacyAndResourcesInDialog: true, searchContinuesInModal: true, explicitPresetSelection: true, rangeInSidebar: true, manualFirst: true, presetSkipsManualPicker: true, scopePresets: state.scopePresets.length, presetsRemainIndependent: true, taskScopeProtected: true, scopeFiltersLocal: true, agentApi: true };
   Object.assign(result, { adaptiveRetries: true, retryBackoff: true, coverageMatchesScope: true, fillOnlyMissingPages: true, completedTopicsSkipped: true, incrementalToggleWorks: true, compactSnippets: true, replyExpansionPreserved: true, loggedOutNoticeChinese: true, historyAutocomplete: true, historyKeyboardSearch: true, historyDismissal: true, progressPanelsExclusive: true, resultPagination: true });
   document.body.insertAdjacentHTML('beforeend', '<pre id="integration-result">' + JSON.stringify(result) + '</pre>');
   document.documentElement.dataset.smoke = 'finished';
@@ -608,7 +613,7 @@ const server = http.createServer((req, res) => {
   if (req.url === "/search.js") {
     res.setHeader("Content-Type", "text/javascript");
     res.end(read("search.js").replace(/init\(\)\.catch\([\s\S]*$/, ""));
-  } else if (req.url === "/forum-model.js" || req.url === "/forum-client.js") {
+  } else if (req.url === "/forum-model.js" || req.url === "/forum-client.js" || req.url === "/agent-api.js") {
     res.setHeader("Content-Type", "text/javascript");
     res.end(read(req.url.slice(1)));
   } else if (req.url === "/task-engine.js") {

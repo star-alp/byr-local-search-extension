@@ -2,6 +2,7 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const { webcrypto } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
@@ -23,16 +24,17 @@ function page() {
     return nodes.get(selector);
   } };
   const context = vm.createContext({
-    document, URL, URLSearchParams, DOMException, structuredClone, Blob,
+    document, URL, URLSearchParams, DOMException, structuredClone, Blob, crypto: webcrypto,
     window: { location: { search: "" }, setTimeout, clearTimeout },
     localStorage: { getItem() { return null; }, setItem() {} },
     chrome: { runtime: { async sendMessage() { throw new Error("不应发出请求"); } } }
   });
   const model = fs.readFileSync(path.join(root, "forum-model.js"), "utf8");
   const client = fs.readFileSync(path.join(root, "forum-client.js"), "utf8");
+  const agent = fs.readFileSync(path.join(root, "agent-api.js"), "utf8");
   const source = fs.readFileSync(path.join(root, "search.js"), "utf8").replace(/init\(\)\.catch\([\s\S]*$/, "");
   vm.runInContext(fs.readFileSync(path.join(root, "task-engine.js"), "utf8"), context);
-  vm.runInContext(model + "\n" + client + "\n" + source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, renderThreadGroup, queryGroups, parseSearchQuery, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument, boardPosts, forumThreadId, ForumClient, coverageStatus, rememberIndexedPages, enqueueIndexedPost, shouldReadIndexedPost };", context);
+  vm.runInContext(agent + "\n" + model + "\n" + client + "\n" + source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, renderThreadGroup, queryGroups, parseSearchQuery, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument, boardPosts, forumThreadId, ForumClient, coverageStatus, rememberIndexedPages, enqueueIndexedPost, shouldReadIndexedPost, agentController };", context);
   return { context, api: context.api };
 }
 
@@ -562,4 +564,30 @@ test("会话缓存页数受限，任务快照不包含整个会话缓存", () =>
   assert.equal(api.state.sessionPages.has("page0"), false);
   const tasks = engine();
   assert.equal(tasks.snapshot(tasks.create("online", [board], options, "txf")).sessionPages, undefined);
+});
+
+test("Agent 协议解析版本化 URL，并拒绝未声明参数", () => {
+  const { context } = page();
+  const agent = context.ByrAgent;
+  const command = agent.parseUrl("?agent=1&api=1&action=search&query=%3C%E5%85%B3%E9%94%AE%E8%AF%8D%3E&mode=online&scope=last-used&boardPages=all&threadPages=3&pageSize=50&stream=0");
+  assert.equal(command.action, "search");
+  assert.equal(command.options.query, "<关键词>");
+  assert.equal(command.options.boardPages, null);
+  assert.equal(command.options.threadPages, 3);
+  assert.equal(command.pageSize, 50);
+  assert.equal(command.stream, false);
+  assert.throws(() => agent.parseUrl("?agent=1&api=1&query=x&unknown=y"), /不支持的 URL 参数/);
+  assert.throws(() => agent.parseUrl("?agent=1&api=2&action=search&query=x"), (error) => error.code === "UNSUPPORTED_VERSION");
+});
+
+test("Agent 能力说明不会暴露完整正文或账号凭据", () => {
+  const { api } = page();
+  const response = api.agentController.api.getCapabilities();
+  assert.equal(response.ok, true);
+  assert.equal(response.apiVersion, 1);
+  assert.equal(response.data, undefined);
+  assert.equal(response.results.fullContent, false);
+  assert.equal(response.additionalPermissions, false);
+  assert.ok(response.methods.startSearch);
+  assert.ok(response.url.fields.includes("scope"));
 });

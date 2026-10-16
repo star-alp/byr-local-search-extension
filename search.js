@@ -95,7 +95,8 @@ const state = {
   settingsBackgroundTargets: [],
   settingsGuardBound: false,
   settingsScrollState: null,
-  coverageRenderTimer: null
+  coverageRenderTimer: null,
+  suppressPreferenceWrites: false
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -115,6 +116,7 @@ function loadSavedBoardSelection() {
 }
 
 function saveBoardSelection() {
+  if (state.suppressPreferenceWrites) return;
   localStorage.setItem(BOARD_SELECTION_STORAGE_KEY, JSON.stringify([...state.selectedBoardNames]));
 }
 
@@ -151,6 +153,7 @@ function indexOptionValues() {
 }
 
 function saveIndexOptions() {
+  if (state.suppressPreferenceWrites) return;
   localStorage.setItem(INDEX_OPTIONS_STORAGE_KEY, JSON.stringify(indexOptionValues()));
 }
 
@@ -548,6 +551,7 @@ async function deleteSearchSession(id) {
 }
 
 function saveScopePresets() {
+  if (state.suppressPreferenceWrites) return;
   localStorage.setItem(SCOPE_PRESETS_STORAGE_KEY, JSON.stringify({ presets: state.scopePresets, activeId: state.activeScopeId, selectionMode: "explicit" }));
 }
 
@@ -2197,17 +2201,17 @@ async function runTask(task) {
   }
 }
 
-async function startNewTask(mode, fresh = false, overrides = {}) {
+async function startNewTask(mode, fresh = false, overrides = {}, control = {}) {
   if (state.indexRunning || state.onlineSearchRunning) return;
   const query = mode === "online" ? $("#query-input").value.trim() : "";
   if (mode === "online" && !query) { showToast("请输入搜索关键词"); return; }
   if (mode === "online" && !parseSearchQuery(query).valid) { showToast("请检查关键词、OR 或筛选条件"); return; }
   if (mode === "online") {
-    rememberSearch(query, mode);
+    if (control.remember !== false) rememberSearch(query, mode);
     resetResultsPage();
   }
   const previous = state.tasks[mode];
-  if (previous?.phase === "paused" && !window.confirm("开始新任务会替换当前暂停任务的进度，已保存的本地内容会保留。继续吗？")) return;
+  if (previous?.phase === "paused" && !control.confirm && !window.confirm("开始新任务会替换当前暂停任务的进度，已保存的本地内容会保留。继续吗？")) return;
   try {
     if (!state.boards.length) await loadBoards();
     const names = resolveBoardNames([...state.selectedBoardNames]);
@@ -2230,8 +2234,14 @@ async function startNewTask(mode, fresh = false, overrides = {}) {
       state.onlineQuery = query;
       primeSessionResults(task);
     }
-    await runTask(task);
+    const running = runTask(task);
+    if (control.background) {
+      running.catch((error) => { task.error = ForumClient.userMessage(error); task.phase = "paused"; });
+      return task;
+    }
+    await running;
   } catch (error) {
+    if (control.background) throw error;
     showToast(error.message || "无法开始任务");
   }
 }
@@ -2395,12 +2405,12 @@ function searchSourceDocuments() {
   }
 }
 
-function searchDocuments(query) {
+function searchDocuments(query, type = state.activeType) {
   const criteria = parseSearchQuery(query);
   if (!criteria.valid) return [];
   const groups = criteria.groups;
   const source = searchSourceDocuments();
-  const candidates = source.filter((documentData) => (state.activeType === "all" || documentData.type === state.activeType)
+  const candidates = source.filter((documentData) => (type === "all" || documentData.type === type)
     && (!criteria.filters.type.length || criteria.filters.type.includes(documentData.type)));
   return candidates.map((documentData) => {
     const match = matchDocument(documentData, groups, criteria);
@@ -2850,6 +2860,108 @@ function bindEvents() {
   }));
 }
 
+function agentError(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+
+function prepareAgentSearch(options, search) {
+  if (state.onlineSearchRunning || state.indexRunning || state.boardListLoading) throw agentError("BUSY", "当前任务正在运行，请等待完成或先停止搜索");
+  if ($("#search-settings").open) throw agentError("SETTINGS_OPEN", "请先关闭更多设置窗口");
+  const mode = options.mode || state.searchMode;
+  if (options.query !== undefined && !parseSearchQuery(options.query).valid) throw agentError("INVALID_QUERY", "请检查关键词、OR 或筛选条件");
+  if (search && mode === "online" && state.tasks.online?.phase === "paused" && !options.confirm) throw agentError("CONFIRMATION_REQUIRED", "存在暂停的在线任务；替换进度前请设置 confirm: true");
+  const scopeId = options.scope === "recommended" ? "recommended" : options.scope?.startsWith("saved:") ? options.scope.slice(6) : "current";
+  const preset = scopeId === "current" ? null : scopePreset(scopeId);
+  if (scopeId !== "current" && !preset) throw agentError("SCOPE_NOT_FOUND", "找不到该常用范围，请调用 listScopes 查看有效 ID");
+  const requested = options.boards || preset?.boards || [...state.selectedBoardNames];
+  const boards = resolveBoardNames(requested);
+  const unknown = requested.filter((name) => !resolveBoardNames([name]).length);
+  if (unknown.length) throw agentError("BOARD_NOT_FOUND", `版面不存在或尚未加载：${unknown.join("、")}`);
+  if (search && !boards.length) throw agentError("NO_BOARDS", "请先登录论坛并读取版面，然后选择至少一个版面");
+  const values = { ...indexOptionValues(), ...preset?.options };
+  for (const [field, all] of [["boardPages", "boardAll"], ["threadPages", "threadAll"]]) if (options[field] !== undefined) {
+    values[all] = options[field] === null;
+    if (options[field] !== null) values[field] = options[field];
+  }
+  for (const field of ["timeRange", "dateFrom", "dateTo"]) if (options[field] !== undefined) values[field] = options[field];
+  try { readIndexOptions(values); }
+  catch (error) { throw agentError("INVALID_ARGUMENT", error.message); }
+  return { mode, query: options.query, scopeId, boards, values };
+}
+
+function configureAgentSearch(prepared, options) {
+  const previous = state.suppressPreferenceWrites;
+  state.suppressPreferenceWrites = !options.persist;
+  try {
+    state.activeScopeId = prepared.scopeId;
+    applyIndexOptionValues(prepared.values);
+    setBoardSelection(prepared.boards);
+    if (prepared.query !== undefined) $("#query-input").value = prepared.query;
+    setSearchHistoryOpen(false);
+    setSearchMode(prepared.mode);
+    if (options.persist) saveScopePresets();
+  } finally { state.suppressPreferenceWrites = previous; }
+}
+
+function agentSearchView() {
+  const online = state.searchMode === "online";
+  const task = online ? state.tasks.online : null;
+  const query = online && state.onlineQuery ? state.onlineQuery : $("#query-input").value;
+  const boards = task?.boards.map((board) => board.name) || [...state.selectedBoardNames];
+  const options = task?.options || indexOptionValues();
+  const running = online && state.onlineSearchRunning;
+  const metrics = task ? ByrTasks.metrics(task) : null;
+  return {
+    source: task,
+    key: JSON.stringify([state.searchMode, query, boards, options]),
+    status: {
+      mode: state.searchMode, query, boards, options, running,
+      status: running ? task?.pauseRequested ? "stopping" : "running" : task?.phase || (query.trim() ? online ? "idle" : "complete" : "idle"),
+      connection: $("#login-state").textContent,
+      progress: {
+        scannedBoards: metrics?.boards || 0, totalBoards: metrics?.boardTotal ?? boards.length,
+        boardPages: metrics?.boardPages || 0, contentPages: metrics?.contentPages || 0, nativePages: metrics?.nativePages || 0,
+        threads: metrics?.threads || 0, requestCount: task?.requests || 0, failures: metrics?.failures.length || 0, skipped: metrics?.skipped || 0
+      },
+      error: task?.error ? { code: "TASK_PAUSED", message: ForumClient.userMessage(task.error) } : null
+    }
+  };
+}
+
+const agentController = ByrAgent.create({
+  userMessage: (error) => ForumClient.userMessage(error, "Agent 调用失败，请重试"),
+  prepare: prepareAgentSearch,
+  configure: configureAgentSearch,
+  async start(prepared, options) {
+    configureAgentSearch(prepared, options);
+    if (prepared.mode === "online") {
+      await startNewTask("online", false, {}, { background: true, remember: options.persist, confirm: options.confirm });
+    } else {
+      if (options.persist) rememberSearch(prepared.query, "local");
+      renderResults();
+    }
+  },
+  view: agentSearchView,
+  results() {
+    const query = agentSearchView().status.query;
+    // 程序接口返回独立的正文与回帖命中，不受页面分页、折叠和分类导航影响。
+    return searchDocuments(query, "all").map(({ documentData: doc, score, matchedFields, terms }) => ({
+      id: doc.id, type: doc.type, title: doc.title || "", board: doc.board, boardDescription: doc.boardDescription || "",
+      author: doc.author || "", authorName: doc.authorName || "", threadId: String(doc.threadId || doc.gid || ""),
+      articleId: doc.articleId ? String(doc.articleId) : null, position: doc.pos ?? 0, time: doc.time ?? null,
+      snippet: getSnippet(doc.content, terms), score, matchedFields, terms,
+      url: threadUrl(doc, terms), provisional: Boolean(doc.cachePreview), fetchedAt: doc.fetchedAt || null
+    }));
+  },
+  scopes: () => [
+    { id: "last-used", name: "当前选择", boards: [...state.selectedBoardNames], options: indexOptionValues() },
+    ...[scopePreset("recommended"), ...state.scopePresets].map((preset) => ({ ...preset, id: preset.id === "recommended" ? preset.id : `saved:${preset.id}` }))
+  ],
+  boards: (query) => state.boards.filter((board) => `${board.name} ${board.description}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map((board) => ({ id: board.name, name: board.description, selected: state.selectedBoardNames.has(board.name) })),
+  cancel: () => pauseTask("online")
+});
+Object.defineProperty(globalThis, ByrAgent.GLOBAL_NAME, { value: agentController.api });
+
 async function init() {
   bindEvents();
   loadPerformanceConfig();
@@ -2879,6 +2991,7 @@ async function init() {
   $("#scope-preset-name").value = state.scopePresets.find((preset) => preset.id === state.editingScopeId)?.name || "";
   renderScopePresets();
   $("#manual-board-details").open = !state.scopePresets.some((preset) => preset.id === state.activeScopeId);
+  await agentController.initialize(window.location.search);
 }
 
-init().catch((error) => showToast(error.message || "初始化失败"));
+init().catch((error) => { agentController.failInitialization(error); showToast(error.message || "初始化失败"); });
