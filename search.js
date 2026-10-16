@@ -867,6 +867,42 @@ function showToast(message) {
   state.toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 3600);
 }
 
+function agentPageUrl() {
+  const base = globalThis.chrome?.runtime?.getURL?.("search.html") || "chrome-extension://<扩展ID>/search.html";
+  const params = new URLSearchParams({ agent: "1", api: "1", action: "configure", mode: state.searchMode, scope: "last-used", stream: "1" });
+  return `${base}?${params.toString()}`;
+}
+
+function buildAgentPrompt() {
+  return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n连接规则：\n1. 使用 Chrome DevTools Protocol 连接本机 127.0.0.1:9222；扩展本身不监听本地端口。\n2. 如果调试接口未开启，请先询问用户是否允许使用专用 Chrome 用户目录启动本地调试模式。\n3. 在扩展页面中调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__，先执行 getCapabilities()，再执行 startSearch({ query: "<关键词>", mode: "online", scope: "last-used" })。\n4. 使用 getStatus() 查看进度，使用 getResults({ cursor, limit }) 按游标读取新增结果，直到 running 为 false。\n5. 返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。\n6. 清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n如果当前目录存在 agent-cli.mjs，优先使用：\nnode agent-cli.mjs capabilities --port 9222 --url "${agentPageUrl()}"\nnode agent-cli.mjs search --port 9222 --url "${agentPageUrl()}" --query "<关键词>" --mode online --scope last-used --wait\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("浏览器未允许写入剪贴板");
+}
+
+async function copyAgentPrompt() {
+  try {
+    await copyText(buildAgentPrompt());
+    showToast("Agent 提示词已复制，可粘贴给 AI");
+  } catch (error) {
+    showToast(error.message || "复制失败，请检查浏览器剪贴板权限");
+  }
+}
+
 function formatBytes(value) {
   const bytes = Number(value);
   if (!Number.isFinite(bytes) || bytes < 0) return "无法估算";
@@ -2693,6 +2729,7 @@ function bindEvents() {
   }, true);
   $("#fresh-online").addEventListener("click", () => startNewTask("online", true));
   $("#open-settings").addEventListener("click", () => setSettingsOpen(true));
+  $("#copy-agent-prompt").addEventListener("click", copyAgentPrompt);
   $("#close-settings").addEventListener("click", () => setSettingsOpen(false));
   $("#search-settings").addEventListener("cancel", (event) => { event.preventDefault(); setSettingsOpen(false); });
   $("#save-scope-preset").addEventListener("click", saveScopePreset);

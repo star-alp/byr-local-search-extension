@@ -119,6 +119,7 @@ const scenario = String.raw`
   assert(agentCapabilities.ok && agentCapabilities.apiVersion === 1 && agentCapabilities.results.fullContent === false, 'Agent API应在真实浏览器页面中初始化且不返回完整正文');
   const agentStatus = agentApi.getStatus();
   assert(agentStatus.ok && agentStatus.ready && ['idle', 'complete', 'paused'].includes(agentStatus.status), 'Agent API应返回当前页面的可用状态：' + JSON.stringify(agentStatus));
+  assert(document.querySelector('#copy-agent-prompt'), '页面应提供复制 Agent 提示词入口');
   if (!resume) {
     const notice = document.querySelector('#toast').textContent;
     assert(notice.includes('打开论坛登录') && !notice.includes("haven't login"), '未登录初始化时右下角必须显示中文登录指引');
@@ -601,7 +602,7 @@ const scenario = String.raw`
   assert(progressDetails.hidden && skippedPanel.hidden, '再次点击当前按钮应收起所有详情');
   state.tasks.online = previousTask;
   updateTaskStatus(previousTask);
-  const result = { ok: true, onlineHits: state.onlineDocuments.length, savedDocuments: saved.length, orQueries: true, cacheFindsPreviouslyUnmatched: true, cacheReducesRequests: true, cacheScopeProtected: true, cacheExpiry: true, forceRefresh: true, replyMatchesOwnFields: true, nativePagination: true, nativePageLimit: true, nativeRetryOnlyFailed: true, mixedTimeSort: true, checkpointRecovered: true, reopenedPageRecovered: true, retryWithoutRepeating: true, historyPreserved: true, privacyAndResourcesInDialog: true, searchContinuesInModal: true, explicitPresetSelection: true, rangeInSidebar: true, manualFirst: true, presetSkipsManualPicker: true, scopePresets: state.scopePresets.length, presetsRemainIndependent: true, taskScopeProtected: true, scopeFiltersLocal: true, agentApi: true };
+  const result = { ok: true, onlineHits: state.onlineDocuments.length, savedDocuments: saved.length, orQueries: true, cacheFindsPreviouslyUnmatched: true, cacheReducesRequests: true, cacheScopeProtected: true, cacheExpiry: true, forceRefresh: true, replyMatchesOwnFields: true, nativePagination: true, nativePageLimit: true, nativeRetryOnlyFailed: true, mixedTimeSort: true, checkpointRecovered: true, reopenedPageRecovered: true, retryWithoutRepeating: true, historyPreserved: true, privacyAndResourcesInDialog: true, searchContinuesInModal: true, explicitPresetSelection: true, rangeInSidebar: true, manualFirst: true, presetSkipsManualPicker: true, scopePresets: state.scopePresets.length, presetsRemainIndependent: true, taskScopeProtected: true, scopeFiltersLocal: true, agentApi: true, agentPromptButton: true };
   Object.assign(result, { adaptiveRetries: true, retryBackoff: true, coverageMatchesScope: true, fillOnlyMissingPages: true, completedTopicsSkipped: true, incrementalToggleWorks: true, compactSnippets: true, replyExpansionPreserved: true, loggedOutNoticeChinese: true, historyAutocomplete: true, historyKeyboardSearch: true, historyDismissal: true, progressPanelsExclusive: true, resultPagination: true });
   document.body.insertAdjacentHTML('beforeend', '<pre id="integration-result">' + JSON.stringify(result) + '</pre>');
   document.documentElement.dataset.smoke = 'finished';
