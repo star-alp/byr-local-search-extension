@@ -129,6 +129,7 @@ const scenario = String.raw`
   const savedQuery = historyInput.value;
   assert(historyPopup.hidden && historyPopup.tagName !== 'DETAILS', '最近搜索默认不占页面空间，也不再使用折叠行');
   assert(!document.querySelector('#search-mode-description') && document.querySelector('.search-mode-row .query-help'), '搜索语法说明应移到模式切换右侧');
+  assert(document.querySelector('#search-sessions-toggle').closest('#settings-preferences-panel') && document.querySelector('#save-online-results').closest('#settings-preferences-panel') && !document.querySelector('.search-panel #search-sessions-toggle'), '保存结果和保存会话应迁移到左侧侧边栏');
   state.searchHistory = [
     { query: '课程资料', mode: 'local' },
     { query: '课程安排', mode: 'local' },
@@ -539,6 +540,31 @@ const scenario = String.raw`
   renderResults();
   assert(document.querySelector('.result-child-more').open, '在线结果刷新后不能自动收起用户展开的命中回帖');
   state.onlineDocuments = originalOnline;
+  const originalPageSize = state.resultsPageSize;
+  const originalType = state.activeType;
+  const paginationDocuments = Array.from({ length: 35 }, (_, index) => ({
+    id: 'thread:Talking:page-' + index, type: 'thread', board: 'Talking', gid: 'page-' + index,
+    title: '分页测试主题 ' + index, content: '分页关键词', author: 'page-user', time: '2026-10-12'
+  }));
+  state.onlineDocuments = paginationDocuments;
+  state.onlineQuery = '分页关键词';
+  state.activeType = 'thread';
+  state.resultsPageSize = 10;
+  document.querySelector('#result-page-size').value = '10';
+  resetResultsPage();
+  renderResults();
+  assert(!document.querySelector('#result-pagination').hidden && document.querySelectorAll('#result-list > .result-card').length === 10 && document.querySelector('#result-page-status').textContent === '第 1 / 4 页', '结果超过一页时应显示分页和每页条数');
+  const firstPageTitle = document.querySelector('#result-list .result-title').textContent;
+  document.querySelector('#result-next').click();
+  assert(document.querySelector('#result-page-status').textContent === '第 2 / 4 页' && document.querySelector('#result-list .result-title').textContent !== firstPageTitle, '下一页应替换结果内容并更新页码');
+  document.querySelector('#result-page-input').value = '4';
+  document.querySelector('#result-page-input').dispatchEvent(new Event('change', { bubbles: true }));
+  assert(document.querySelector('#result-page-status').textContent === '第 4 / 4 页' && document.querySelectorAll('#result-list > .result-card').length === 5, '页码输入应跳转到末页');
+  state.resultsPageSize = originalPageSize;
+  state.activeType = originalType;
+  state.onlineDocuments = originalOnline;
+  resetResultsPage();
+  renderResults();
   document.querySelector('#query-input').value = '已更新正文';
   state.onlineQuery = '已更新正文';
   renderResults();
@@ -570,7 +596,7 @@ const scenario = String.raw`
   state.tasks.online = previousTask;
   updateTaskStatus(previousTask);
   const result = { ok: true, onlineHits: state.onlineDocuments.length, savedDocuments: saved.length, orQueries: true, cacheFindsPreviouslyUnmatched: true, cacheReducesRequests: true, cacheScopeProtected: true, cacheExpiry: true, forceRefresh: true, replyMatchesOwnFields: true, nativePagination: true, nativePageLimit: true, nativeRetryOnlyFailed: true, mixedTimeSort: true, checkpointRecovered: true, reopenedPageRecovered: true, retryWithoutRepeating: true, historyPreserved: true, privacyAndResourcesInDialog: true, searchContinuesInModal: true, explicitPresetSelection: true, rangeInSidebar: true, manualFirst: true, presetSkipsManualPicker: true, scopePresets: state.scopePresets.length, presetsRemainIndependent: true, taskScopeProtected: true, scopeFiltersLocal: true };
-  Object.assign(result, { adaptiveRetries: true, retryBackoff: true, coverageMatchesScope: true, fillOnlyMissingPages: true, completedTopicsSkipped: true, incrementalToggleWorks: true, compactSnippets: true, replyExpansionPreserved: true, loggedOutNoticeChinese: true, historyAutocomplete: true, historyKeyboardSearch: true, historyDismissal: true, progressPanelsExclusive: true });
+  Object.assign(result, { adaptiveRetries: true, retryBackoff: true, coverageMatchesScope: true, fillOnlyMissingPages: true, completedTopicsSkipped: true, incrementalToggleWorks: true, compactSnippets: true, replyExpansionPreserved: true, loggedOutNoticeChinese: true, historyAutocomplete: true, historyKeyboardSearch: true, historyDismissal: true, progressPanelsExclusive: true, resultPagination: true });
   document.body.insertAdjacentHTML('beforeend', '<pre id="integration-result">' + JSON.stringify(result) + '</pre>');
   document.documentElement.dataset.smoke = 'finished';
 })().catch(error => document.body.insertAdjacentHTML('beforeend', '<pre id="integration-result">' + JSON.stringify({ ok: false, error: error.message, stack: error.stack }) + '</pre>'));

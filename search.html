@@ -163,6 +163,25 @@
           </div>
         </details>
 
+        <details id="search-result-management" class="sidebar-details">
+          <summary><span class="summary-title">搜索结果管理</span><span class="summary-meta">保存结果 · 已保存会话</span></summary>
+          <div class="details-content">
+            <div class="sidebar-search-actions">
+              <button id="search-sessions-toggle" class="text-button disclosure-button" type="button" aria-expanded="false" aria-controls="search-sessions">已保存会话</button>
+              <button id="fresh-online" class="text-button" type="button">重新获取最新数据</button>
+            </div>
+            <div id="online-search-tools" class="sidebar-online-tools" hidden>
+              <button id="pause-online" class="button button-secondary" type="button" hidden>暂停</button>
+              <button id="continue-online" class="button button-primary" type="button" hidden>继续搜索</button>
+              <button id="retry-online" class="button button-secondary" type="button" hidden>重试失败项</button>
+              <button id="new-online" class="text-button" type="button" hidden>新搜索</button>
+              <button id="save-online-results" class="button button-secondary" type="button" hidden disabled>保存结果</button>
+              <button id="save-search-session" class="button button-secondary" type="button" hidden disabled>保存会话</button>
+            </div>
+            <div id="search-sessions" class="search-session-panel" role="region" aria-labelledby="search-sessions-toggle" hidden><div id="search-session-list" class="search-session-list"><span class="field-help">暂无保存的搜索会话</span></div></div>
+          </div>
+        </details>
+
       <details class="sidebar-details performance-section">
         <summary><span class="summary-title">请求速度</span><span id="performance-summary" class="summary-meta">极速 · 同时 8 个 · 每 50 毫秒启动</span></summary>
         <div class="details-content">
@@ -216,19 +235,6 @@
         <p id="online-search-status-details" class="search-progress-details" hidden>版面 0/0 · 主题页 0 · 内容页 0 · 主题 0 · 请求 0 次</p>
         <div id="task-skipped" class="search-progress-details" role="region" aria-labelledby="task-skipped-summary" hidden><div id="task-skipped-list"></div></div>
       </div>
-      <div class="search-actions-row">
-        <button id="search-sessions-toggle" class="text-button disclosure-button" type="button" aria-expanded="false" aria-controls="search-sessions">已保存会话</button>
-        <div id="online-search-tools" class="online-search-tools" hidden>
-          <button id="pause-online" class="button button-secondary" type="button" hidden>暂停</button>
-          <button id="continue-online" class="button button-primary" type="button" hidden>继续搜索</button>
-          <button id="retry-online" class="button button-secondary" type="button" hidden>重试失败项</button>
-          <button id="new-online" class="text-button" type="button" hidden>新搜索</button>
-          <button id="save-online-results" class="button button-secondary" type="button" hidden disabled>保存结果</button>
-          <button id="save-search-session" class="button button-secondary" type="button" hidden disabled>保存会话</button>
-        </div>
-        <button id="fresh-online" class="text-button" type="button">重新获取最新数据</button>
-      </div>
-      <div id="search-sessions" class="search-session-panel" role="region" aria-labelledby="search-sessions-toggle" hidden><div id="search-session-list" class="search-session-list"><span class="field-help">暂无保存的搜索会话</span></div></div>
       <details id="task-failures" class="task-failures" hidden><summary id="task-failures-summary">失败任务</summary><div id="task-failures-list"></div></details>
       <nav class="result-tabs" aria-label="搜索结果类型">
         <button class="result-tab is-active" data-type="all" type="button">综合</button>
@@ -239,10 +245,13 @@
       </nav>
       <div class="result-toolbar">
         <span id="result-count">输入关键词开始搜索</span>
-        <select id="sort-select" class="sort-select" aria-label="结果排序">
-          <option value="relevance">按相关度</option>
-          <option value="recent">按时间</option>
-        </select>
+        <div class="result-toolbar-actions">
+          <select id="sort-select" class="sort-select" aria-label="结果排序">
+            <option value="relevance">按相关度</option>
+            <option value="recent">按时间</option>
+          </select>
+          <label class="result-page-size-label" for="result-page-size">每页<select id="result-page-size" class="sort-select" aria-label="每页结果数"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option><option value="100">100</option></select>条</label>
+        </div>
       </div>
       <div id="result-list" class="result-list">
         <div class="empty-state">
@@ -250,6 +259,12 @@
           <p>点击搜索后会扫描当前选择的版面范围。</p>
         </div>
       </div>
+      <nav id="result-pagination" class="result-pagination" aria-label="搜索结果分页" hidden>
+        <button id="result-prev" class="text-button" type="button">上一页</button>
+        <span id="result-page-status">第 1 / 1 页</span>
+        <button id="result-next" class="text-button" type="button">下一页</button>
+        <label class="result-page-jump" for="result-page-input">跳至<input id="result-page-input" class="input-control" type="number" min="1" value="1" aria-label="跳转到页码">页</label>
+      </nav>
     </section>
   </main>
 

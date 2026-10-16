@@ -17,6 +17,8 @@ const PAGE_SIZE = 10;
 const SESSION_CACHE_TTL_MS = 5 * 60 * 1000;
 const SESSION_CACHE_MAX_BYTES = 8 * 1024 * 1024;
 const SESSION_CACHE_MAX_PAGES = 512;
+const RESULT_PAGE_SIZE_STORAGE_KEY = "byr-result-page-size";
+const RESULT_PAGE_SIZES = [10, 20, 50, 100];
 const BOARD_SELECTION_STORAGE_KEY = "byr-search-board-selection";
 const INDEX_OPTIONS_STORAGE_KEY = "byr-search-index-options";
 const SCOPE_PRESETS_STORAGE_KEY = "byr-search-scope-presets";
@@ -81,6 +83,8 @@ const state = {
   boardSearchActiveIndex: -1,
   searchHistory: [],
   searchHistoryActiveIndex: -1,
+  resultsPage: 1,
+  resultsPageSize: 20,
   searchSessions: [],
   indexMetadata: {},
   indexCoverage: {},
@@ -298,6 +302,40 @@ function loadSearchHistory() {
     state.searchHistory = [];
   }
   renderSearchHistory();
+}
+
+function loadResultPageSize() {
+  const value = Number(localStorage.getItem(RESULT_PAGE_SIZE_STORAGE_KEY));
+  if (RESULT_PAGE_SIZES.includes(value)) state.resultsPageSize = value;
+  const select = $("#result-page-size");
+  if (select) select.value = String(state.resultsPageSize);
+}
+
+function saveResultPageSize() {
+  localStorage.setItem(RESULT_PAGE_SIZE_STORAGE_KEY, String(state.resultsPageSize));
+}
+
+function updateResultPagination(total) {
+  const pagination = $("#result-pagination");
+  if (!pagination) return;
+  const pageCount = Math.max(1, Math.ceil(total / state.resultsPageSize));
+  state.resultsPage = Math.max(1, Math.min(state.resultsPage, pageCount));
+  const hasPagination = total > state.resultsPageSize;
+  pagination.hidden = !hasPagination;
+  $("#result-page-status").textContent = `第 ${state.resultsPage} / ${pageCount} 页`;
+  $("#result-prev").disabled = state.resultsPage <= 1;
+  $("#result-next").disabled = state.resultsPage >= pageCount;
+  $("#result-page-input").value = String(state.resultsPage);
+  $("#result-page-input").max = String(pageCount);
+}
+
+function resetResultsPage() {
+  state.resultsPage = 1;
+}
+
+function setResultsPage(page) {
+  state.resultsPage = Math.max(1, Number(page) || 1);
+  renderResults();
 }
 
 function saveSearchHistory() {
@@ -2149,7 +2187,10 @@ async function startNewTask(mode, fresh = false, overrides = {}) {
   const query = mode === "online" ? $("#query-input").value.trim() : "";
   if (mode === "online" && !query) { showToast("请输入搜索关键词"); return; }
   if (mode === "online" && !parseSearchQuery(query).valid) { showToast("请检查关键词、OR 或筛选条件"); return; }
-  if (mode === "online") rememberSearch(query, mode);
+  if (mode === "online") {
+    rememberSearch(query, mode);
+    resetResultsPage();
+  }
   const previous = state.tasks[mode];
   if (previous?.phase === "paused" && !window.confirm("开始新任务会替换当前暂停任务的进度，已保存的本地内容会保留。继续吗？")) return;
   try {
@@ -2230,6 +2271,7 @@ function setSearchMode(mode) {
   const online = mode === "online";
   if (state.onlineSearchRunning && !online) { showToast("请先暂停搜索"); return; }
   state.searchMode = online ? "online" : "local";
+  resetResultsPage();
   $("#search-mode-local").classList.toggle("is-active", !online);
   $("#search-mode-online").classList.toggle("is-active", online);
   $("#search-mode-local").setAttribute("aria-selected", String(!online));
@@ -2474,12 +2516,14 @@ function renderResults() {
   const query = state.searchMode === "online" && state.onlineQuery ? state.onlineQuery : $("#query-input").value;
   const list = $("#result-list");
   if (!query.trim()) {
+    updateResultPagination(0);
     const sourceCount = searchSourceDocuments().length;
     $("#result-count").textContent = sourceCount ? `当前有 ${sourceCount} 条内容` : "输入关键词开始搜索";
     list.innerHTML = `<div class="empty-state"><strong>输入关键词开始搜索</strong><p>${state.searchMode === "online" ? "点击搜索后会扫描当前选择的版面范围。" : "结果会在当前浏览器本地完成匹配。"}</p></div>`;
     return;
   }
   if (!parseSearchQuery(query).valid) {
+    updateResultPagination(0);
     $("#result-count").textContent = "请检查关键词";
     list.innerHTML = '<div class="empty-state"><strong>搜索条件格式有误</strong><p>请检查引号、OR 或筛选条件。</p></div>';
     return;
@@ -2508,13 +2552,17 @@ function renderResults() {
     ? `找到 ${hitCount} 条命中 · 涉及 ${topicCount} 个主题${hitCount > 200 ? " · 显示前 200 条主题" : ""}`
     : `找到 ${hitCount} 条结果${hitCount > 200 ? " · 显示前 200 条" : ""}`;
   if (!results.length) {
+    updateResultPagination(0);
     const message = state.searchMode === "online" && state.onlineSearchRunning
       ? "正在扫描，匹配结果会陆续显示。"
       : "可以换一个关键词，或扩大版面和历史范围。";
     list.innerHTML = `<div class="empty-state"><strong>没有找到匹配内容</strong><p>${message}</p></div>`;
     return;
   }
-  list.innerHTML = results.slice(0, 200).map((result) => {
+  const displayResults = results.slice(0, 200);
+  updateResultPagination(displayResults.length);
+  const pageStart = (state.resultsPage - 1) * state.resultsPageSize;
+  list.innerHTML = displayResults.slice(pageStart, pageStart + state.resultsPageSize).map((result) => {
     const type = result.resultType || state.activeType;
     if (type === "thread-group") return renderThreadGroup(result);
     if (type === "user") return renderUserResult(result);
@@ -2725,6 +2773,7 @@ function bindEvents() {
   $("#query-input").addEventListener("input", () => {
     state.searchHistoryActiveIndex = -1;
     showSearchHistory();
+    resetResultsPage();
     if (state.searchMode === "local") renderResults();
     else if (!state.onlineSearchRunning) setOnlineSearchStatus("关键词已改变，点击搜索开始新的在线扫描", false);
     updateOnlineSearchControls();
@@ -2754,7 +2803,23 @@ function bindEvents() {
     if (entry) selectSearchHistory(entry);
     else submitSearch();
   });
-  $("#sort-select").addEventListener("change", (event) => { state.sort = event.target.value; renderResults(); });
+  $("#sort-select").addEventListener("change", (event) => { state.sort = event.target.value; resetResultsPage(); renderResults(); });
+  $("#result-page-size").addEventListener("change", (event) => {
+    const value = Number(event.target.value);
+    if (!RESULT_PAGE_SIZES.includes(value)) return;
+    state.resultsPageSize = value;
+    saveResultPageSize();
+    resetResultsPage();
+    renderResults();
+  });
+  $("#result-prev").addEventListener("click", () => setResultsPage(state.resultsPage - 1));
+  $("#result-next").addEventListener("click", () => setResultsPage(state.resultsPage + 1));
+  $("#result-page-input").addEventListener("change", (event) => setResultsPage(event.target.value));
+  $("#result-page-input").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    setResultsPage(event.target.value);
+  });
   $("#task-skipped-list").addEventListener("click", (event) => {
     const button = event.target.closest("[data-retry-skipped]");
     if (!button) return;
@@ -2765,6 +2830,7 @@ function bindEvents() {
     document.querySelectorAll(".result-tab").forEach((item) => item.classList.remove("is-active"));
     tab.classList.add("is-active");
     state.activeType = tab.dataset.type;
+    resetResultsPage();
     renderResults();
   }));
 }
@@ -2777,6 +2843,7 @@ async function init() {
   loadSavedIndexOptions();
   loadIndexMetadata();
   loadSearchHistory();
+  loadResultPageSize();
   await loadSearchSessions();
   loadScopePresets();
   updateIndexRangeSummary();
