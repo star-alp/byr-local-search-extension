@@ -203,7 +203,7 @@
         </div>
       </details>
 
-      <div class="panel-section settings-entry"><button id="open-settings" class="text-button" type="button" aria-haspopup="dialog" aria-controls="search-settings">更多设置</button><button id="copy-agent-prompt" class="text-button" type="button">复制 Agent 提示词</button></div>
+      <div class="panel-section settings-entry"><button id="open-settings" class="text-button" type="button" aria-haspopup="dialog" aria-controls="search-settings">更多设置</button><button id="copy-agent-prompt" class="text-button" type="button">复制 Agent 提示词</button><span id="agent-bridge-status" class="agent-bridge-status" aria-live="polite">Agent 未连接</span></div>
     </aside>
 
     <section class="search-panel">
@@ -274,6 +274,7 @@
   <script src="forum-client.js"></script>
   <script src="task-engine.js"></script>
   <script src="agent-api.js"></script>
+  <script src="agent-bridge-client.js"></script>
   <script src="search.js"></script>
 </body>
 </html>

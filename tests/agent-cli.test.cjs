@@ -39,3 +39,12 @@ test("Agent CLI 对未安装扩展的调试 Chrome 给出中文诊断", async ()
   assert.match(blockedExtensionPageMessage({ href: "chrome-error://chromewebdata/", bodyText: "ERR_BLOCKED_BY_CLIENT" }, "chrome-extension://<扩展ID>/search.html"), /未安装或未启用邮人全搜扩展/u);
   assert.equal(blockedExtensionPageMessage({ href: "chrome-extension://<扩展ID>/search.html", bodyText: "" }, "chrome-extension://<扩展ID>/search.html"), "");
 });
+
+test("Agent CLI 支持选择本地 Bridge 传输", async () => {
+  const file = path.join(__dirname, "..", "agent-cli.mjs");
+  const { parseArgs } = await import(`file://${file}`);
+  const parsed = parseArgs(["status", "--transport", "bridge", "--port", "17832", "--token", "0123456789abcdef0123456789abcdef"]);
+  assert.equal(parsed.transport, "bridge");
+  assert.equal(parsed.port, "17832");
+  assert.equal(parsed.token, "0123456789abcdef0123456789abcdef");
+});

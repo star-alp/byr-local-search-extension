@@ -576,6 +576,9 @@ test("Agent 协议解析版本化 URL，并拒绝未声明参数", () => {
   assert.equal(command.options.threadPages, 3);
   assert.equal(command.pageSize, 50);
   assert.equal(command.stream, false);
+  const bridge = agent.parseUrl("?agent=1&api=1&bridge=1&bridgePort=17832&bridgeToken=0123456789abcdef0123456789abcdef");
+  assert.equal(bridge.bridge.port, 17832);
+  assert.equal(bridge.bridge.token, "0123456789abcdef0123456789abcdef");
   assert.throws(() => agent.parseUrl("?agent=1&api=1&query=x&unknown=y"), /不支持的 URL 参数/);
   assert.throws(() => agent.parseUrl("?agent=1&api=2&action=search&query=x"), (error) => error.code === "UNSUPPORTED_VERSION");
 });

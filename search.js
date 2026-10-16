@@ -874,7 +874,7 @@ function agentPageUrl() {
 }
 
 function buildAgentPrompt() {
-  return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n连接规则：\n1. 使用 Chrome DevTools Protocol 连接本机 127.0.0.1:9222；扩展本身不监听本地端口。\n2. 如果调试接口未开启，请先询问用户是否允许使用专用 Chrome 用户目录启动本地调试模式。\n3. 在扩展页面中调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__，先执行 getCapabilities()，再执行 startSearch({ query: "<关键词>", mode: "online", scope: "last-used" })。\n4. 使用 getStatus() 查看进度，使用 getResults({ cursor, limit }) 按游标读取新增结果，直到 running 为 false。\n5. 返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。\n6. 清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n如果当前目录存在 agent-cli.mjs，优先使用：\nnode agent-cli.mjs capabilities --port 9222 --url "${agentPageUrl()}"\nnode agent-cli.mjs search --port 9222 --url "${agentPageUrl()}" --query "<关键词>" --mode online --scope last-used --wait\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
+  return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n推荐连接方式：本地 Agent Bridge\n1. Bridge 只监听本机 127.0.0.1，不读取密码、Cookie，也不接收完整正文。\n2. 如果 Bridge 尚未安装，请先向用户说明并获得确认，再从项目提供的官方来源安装固定版本；不要临时生成未经确认的桥接程序。\n3. 如果当前目录存在 agent-bridge.mjs，可运行：node agent-bridge.mjs start --port 17832 --token <令牌>。\n4. 启动 Bridge 后，使用它输出的端口和令牌，在扩展页面 URL 后增加 bridge=1、bridgePort=<端口>、bridgeToken=<令牌>，并在用户常用 Chrome 中打开该地址。\n5. Bridge 连接成功后，调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__ 对应的 getCapabilities()、startSearch()、getStatus() 和 getResults()。如果当前目录存在 agent-cli.mjs，可运行：node agent-cli.mjs capabilities --transport bridge --port <端口> --token <令牌>。\n\n备用连接方式：Chrome DevTools Protocol\n如果用户明确允许使用专用调试 Chrome，才使用本地 9222 端口和 agent-cli.mjs；不要尝试接管用户正在运行的普通 Chrome。\n\n调用流程：\n1. 先执行 getCapabilities()。\n2. 执行 startSearch({ query: "<关键词>", mode: "online", scope: "last-used" })。\n3. 使用 getStatus() 查看进度，使用 getResults({ cursor, limit }) 按游标读取新增结果，直到 running 为 false。\n4. 返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。\n5. 清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n如果当前目录存在 agent-cli.mjs，备用 CDP 命令为：\nnode agent-cli.mjs capabilities --port 9222 --url "${agentPageUrl()}"\nnode agent-cli.mjs search --port 9222 --url "${agentPageUrl()}" --query "<关键词>" --mode online --scope last-used --wait\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
 }
 
 async function copyText(value) {
@@ -3028,7 +3028,15 @@ async function init() {
   $("#scope-preset-name").value = state.scopePresets.find((preset) => preset.id === state.editingScopeId)?.name || "";
   renderScopePresets();
   $("#manual-board-details").open = !state.scopePresets.some((preset) => preset.id === state.activeScopeId);
-  await agentController.initialize(window.location.search);
+  const initialized = await agentController.initialize(window.location.search);
+  if (initialized?.command?.bridge && globalThis.ByrAgentBridge) {
+    globalThis.agentBridgeConnection = ByrAgentBridge.connect(agentController.api, initialized.command.bridge, (status) => {
+      const element = $("#agent-bridge-status");
+      if (!element) return;
+      element.textContent = status === "已连接" ? "Agent 已连接" : `Agent ${status}`;
+      element.classList.toggle("is-connected", status === "已连接");
+    });
+  }
 }
 
 init().catch((error) => { agentController.failInitialization(error); showToast(error.message || "初始化失败"); });

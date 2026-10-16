@@ -3,7 +3,7 @@
 globalThis.ByrAgent = (() => {
   const GLOBAL_NAME = "__BYR_LOCAL_SEARCH_AGENT_V1__";
   const SEARCH_FIELDS = ["query", "mode", "scope", "boards", "boardPages", "threadPages", "timeRange", "dateFrom", "dateTo", "persist", "confirm"];
-  const URL_FIELDS = ["agent", "api", "action", "sourceTabId", "pageSize", "stream", ...SEARCH_FIELDS];
+  const URL_FIELDS = ["agent", "api", "action", "sourceTabId", "pageSize", "stream", "bridge", "bridgePort", "bridgeToken", ...SEARCH_FIELDS];
 
   function invalid(message, code = "INVALID_ARGUMENT") {
     throw Object.assign(new Error(message), { code });
@@ -73,7 +73,16 @@ globalThis.ByrAgent = (() => {
     if (!/^\d+$/u.test(pageSize)) invalid("pageSize 必须是整数");
     const stream = params.get("stream") ?? "1";
     if (!["0", "1"].includes(stream)) invalid("stream 只能是 0 或 1");
-    return { action, options: normalizeOptions(options, action === "search"), pageSize: integer(Number(pageSize), 100), stream: stream === "1" };
+    let bridge = null;
+    if (params.has("bridge") || params.has("bridgePort") || params.has("bridgeToken")) {
+      if (params.get("bridge") !== "1") invalid("bridge 必须是 1");
+      const bridgePort = params.get("bridgePort");
+      const bridgeToken = params.get("bridgeToken") || "";
+      if (!/^\d+$/u.test(bridgePort || "") || Number(bridgePort) < 1024 || Number(bridgePort) > 65535) invalid("bridgePort 必须是 1024～65535 的整数");
+      if (!/^[A-Za-z0-9_-]{16,128}$/u.test(bridgeToken)) invalid("bridgeToken 无效");
+      bridge = { port: Number(bridgePort), token: bridgeToken };
+    }
+    return { action, options: normalizeOptions(options, action === "search"), pageSize: integer(Number(pageSize), 100), stream: stream === "1", bridge };
   }
 
   function create(adapter) {
@@ -138,7 +147,7 @@ globalThis.ByrAgent = (() => {
 
     const api = Object.freeze({
       getCapabilities: guarded(() => ({
-        name: "邮人全搜", globalName: GLOBAL_NAME, transport: "Chrome DevTools Protocol / Runtime.evaluate", ready,
+        name: "邮人全搜", globalName: GLOBAL_NAME, transport: "Chrome DevTools Protocol / 本地 Agent Bridge", ready,
         methods: {
           getCapabilities: {}, getStatus: {}, listScopes: {}, listBoards: { query: "可选，版面名称或 ID" },
           startSearch: {
@@ -157,7 +166,7 @@ globalThis.ByrAgent = (() => {
           pageSize: "1～100；设置 getResults 默认批量大小", stream: "默认 1；0 表示扫描停止后才返回结果" },
         results: { types: ["thread", "reply"], order: "增量变更顺序；相关度见 score", operations: ["upsert：按 id 替换", "remove：按 id 删除"],
           cursor: "绑定当前页面与搜索；切换搜索或刷新后失效。每个 id 合并为最近一次变更", fullContent: false, includesHighlightLinks: true },
-        pollingIntervalMs: 1000, maxBatchSize: 100, additionalPermissions: false
+        pollingIntervalMs: 1000, maxBatchSize: 100, additionalPermissions: false, bridge: { protocolVersion: 1, host: "127.0.0.1", extensionInitiatesConnection: true }
       })),
       getStatus: guarded(status),
       listScopes: guarded(() => { requireReady(); return { scopes: adapter.scopes() }; }),
@@ -201,18 +210,19 @@ globalThis.ByrAgent = (() => {
         initializationError = null;
         try {
           const command = parseUrl(search);
-          if (!command) return;
+          if (!command) return { command: null, startup: null };
           pageSize = command.pageSize;
           stream = command.stream;
           if (command.action === "search") {
             startup = await startSearch(command.options);
-            if (!startup.ok) return;
+            if (!startup.ok) return { command, startup };
             startup = { ...startup, action: command.action };
           } else {
             adapter.configure(adapter.prepare(command.options, false), command.options);
             startup = { ok: true, apiVersion: 1, action: command.action };
           }
-        } catch (error) { startup = failure(error); }
+          return { command, startup };
+        } catch (error) { startup = failure(error); return { command: null, startup }; }
       },
       failInitialization(error) { ready = false; initializationError = failure(error).error; }
     };

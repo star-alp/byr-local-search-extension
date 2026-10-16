@@ -1,4 +1,4 @@
-/* 邮人全搜本地 Agent CLI：通过 Chrome DevTools Protocol 调用已打开的扩展页面，不需要扩展监听本地端口。 */
+/* 邮人全搜本地 Agent CLI：支持调试 Chrome 和本机 Agent Bridge 两种连接方式。 */
 
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -34,6 +34,7 @@ function cliHelp() {
 
 用法：
   node agent-cli.mjs capabilities [--port 9222]
+  node agent-cli.mjs capabilities --transport bridge --port 17832 --token <令牌>
   node agent-cli.mjs search --query "<关键词>" [--mode online] [--scope last-used] [--wait]
   node agent-cli.mjs status [--port 9222]
   node agent-cli.mjs results [--cursor <游标>] [--limit 20]
@@ -42,6 +43,8 @@ function cliHelp() {
 
 常用参数：
   --port 9222       Chrome DevTools Protocol 本地端口
+  --transport bridge 使用本地 Agent Bridge；默认使用 CDP
+  --token <令牌>    Agent Bridge 启动时输出的连接令牌
   --url <扩展 URL>  没有已打开的搜索页时尝试新建扩展页面
   --wait            搜索命令等待完成并输出最终结果
   --pretty          美化 JSON 输出
@@ -123,12 +126,58 @@ function connectDebugger(url) {
   };
 }
 
+function connectBridge(port, token) {
+  if (typeof WebSocket !== "function") throw new Error("当前 Node.js 没有内置 WebSocket，请使用 Node.js 22 或更高版本");
+  if (!/^[A-Za-z0-9_-]{16,128}$/u.test(String(token || ""))) throw new Error("Bridge 需要有效的 --token");
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/agent?role=agent&token=${encodeURIComponent(token)}`);
+  let nextId = 0;
+  const pending = new Map();
+  const ready = new Promise((resolve, reject) => {
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({ type: "hello", role: "agent", protocolVersion: 1 }));
+      resolve();
+    }, { once: true });
+    socket.addEventListener("error", () => reject(new Error(`无法连接本地 Agent Bridge（127.0.0.1:${port}）`)), { once: true });
+  });
+  socket.addEventListener("message", (event) => {
+    let message;
+    try { message = JSON.parse(event.data); } catch { return; }
+    if (message.type !== "response" || !message.id) return;
+    const callback = pending.get(message.id);
+    if (!callback) return;
+    pending.delete(message.id);
+    callback(message.result);
+  });
+  socket.addEventListener("close", () => {
+    for (const callback of pending.values()) callback({ ok: false, error: { message: "本地 Agent Bridge 连接已关闭" } });
+    pending.clear();
+  });
+  return {
+    async request(method, argument) {
+      await ready;
+      const id = `${Date.now().toString(36)}-${++nextId}`;
+      const result = await new Promise((resolve) => {
+        pending.set(id, resolve);
+        socket.send(JSON.stringify({ type: "request", id, method, argument }));
+      });
+      if (!result?.ok) throw new Error(result?.error?.message || `${method} 调用失败`);
+      return result;
+    },
+    close() { socket.close(); }
+  };
+}
+
 async function invoke(debuggerClient, method, argument) {
   const encoded = argument === undefined ? "undefined" : JSON.stringify(argument);
   const expression = `(async()=>{const agent=globalThis[${JSON.stringify(AGENT_GLOBAL)}];if(!agent)return {ok:false,error:{code:"AGENT_UNAVAILABLE",message:"当前 Chrome 页面没有加载邮人全搜 Agent API，请确认扩展已安装在同一个 Chrome 用户配置中，并重新加载扩展页面"}};return await agent[${JSON.stringify(method)}](${encoded});})()`;
   const result = await debuggerClient.evaluate(expression);
   if (!result?.ok) throw new Error(result?.error?.message || `${method} 调用失败`);
   return result;
+}
+
+async function invokeClient(client, method, argument) {
+  if (client.request) return client.request(method, argument);
+  return invoke(client, method, argument);
 }
 
 function searchOptions(options) {
@@ -158,7 +207,7 @@ async function waitForResults(client, start, options) {
   let latest;
   const limit = numberOption(options, "limit", 100, 1, 100);
   while (true) {
-    const page = await invoke(client, "getResults", { ...(cursor ? { cursor } : {}), limit });
+    const page = await invokeClient(client, "getResults", { ...(cursor ? { cursor } : {}), limit });
     latest = page;
     applyChanges(results, page.items || []);
     cursor = page.nextCursor;
@@ -166,12 +215,45 @@ async function waitForResults(client, start, options) {
     if (!page.running && !page.hasMore) break;
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
-  const status = await invoke(client, "getStatus");
+  const status = await invokeClient(client, "getStatus");
   return { ok: true, searchId: start.searchId || latest.searchId, status, total: results.size, results: [...results.values()] };
+}
+
+async function runCommand(client, options) {
+  if (options.command === "search") {
+    const start = await invokeClient(client, "startSearch", searchOptions(options));
+    if (options.wait || options.watch) output(await waitForResults(client, start, options), options.pretty);
+    else output(start, options.pretty);
+    return;
+  }
+  if (options.command === "results") {
+    const limit = numberOption(options, "limit", 20, 1, 100);
+    output(await invokeClient(client, "getResults", { ...(options.cursor ? { cursor: options.cursor } : {}), limit }), options.pretty);
+    return;
+  }
+  if (options.command === "cancel") {
+    if (!options["search-id"]) throw new Error("cancel 需要 --search-id");
+    output(await invokeClient(client, "cancelSearch", { searchId: options["search-id"] }), options.pretty);
+    return;
+  }
+  const methods = { capabilities: "getCapabilities", status: "getStatus", scopes: "listScopes", boards: "listBoards" };
+  const method = methods[options.command];
+  if (!method) throw new Error(`无法识别命令：${options.command}`);
+  const argument = options.command === "boards" && options.query ? { query: options.query } : undefined;
+  output(await invokeClient(client, method, argument), options.pretty);
 }
 
 async function run(options) {
   if (options.help) { process.stdout.write(cliHelp()); return; }
+  const transport = options.transport || "cdp";
+  if (!["cdp", "bridge"].includes(transport)) throw new Error("--transport 只能是 cdp 或 bridge");
+  if (transport === "bridge") {
+    const port = numberOption(options, "port", 17832, 1024, 65535);
+    const client = connectBridge(port, options.token);
+    try { await runCommand(client, options); }
+    finally { client.close(); }
+    return;
+  }
   const port = numberOption(options, "port", 9222, 1, 65535);
   const target = await findTarget(port, options.url);
   const client = connectDebugger(target.webSocketDebuggerUrl);
@@ -179,27 +261,7 @@ async function run(options) {
     const page = await client.evaluate("({href: location.href, bodyText: document.body?.innerText?.slice(0, 500) || \"\"})");
     const blockedMessage = blockedExtensionPageMessage(page, target.url);
     if (blockedMessage) throw new Error(blockedMessage);
-    if (options.command === "search") {
-      const start = await invoke(client, "startSearch", searchOptions(options));
-      if (options.wait || options.watch) output(await waitForResults(client, start, options), options.pretty);
-      else output(start, options.pretty);
-      return;
-    }
-    if (options.command === "results") {
-      const limit = numberOption(options, "limit", 20, 1, 100);
-      output(await invoke(client, "getResults", { ...(options.cursor ? { cursor: options.cursor } : {}), limit }), options.pretty);
-      return;
-    }
-    if (options.command === "cancel") {
-      if (!options["search-id"]) throw new Error("cancel 需要 --search-id");
-      output(await invoke(client, "cancelSearch", { searchId: options["search-id"] }), options.pretty);
-      return;
-    }
-    const methods = { capabilities: "getCapabilities", status: "getStatus", scopes: "listScopes", boards: "listBoards" };
-    const method = methods[options.command];
-    if (!method) throw new Error(`无法识别命令：${options.command}`);
-    const argument = options.command === "boards" && options.query ? { query: options.query } : undefined;
-    output(await invoke(client, method, argument), options.pretty);
+    await runCommand(client, options);
   } finally {
     client.close();
   }
@@ -217,4 +279,4 @@ async function main(argv = process.argv.slice(2)) {
 const isDirect = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isDirect) main();
 
-export { applyChanges, blockedExtensionPageMessage, parseArgs, searchOptions, waitForResults };
+export { applyChanges, blockedExtensionPageMessage, connectBridge, invokeClient, parseArgs, searchOptions, waitForResults };

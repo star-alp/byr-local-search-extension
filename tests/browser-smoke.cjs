@@ -614,7 +614,7 @@ const server = http.createServer((req, res) => {
   if (req.url === "/search.js") {
     res.setHeader("Content-Type", "text/javascript");
     res.end(read("search.js").replace(/init\(\)\.catch\([\s\S]*$/, ""));
-  } else if (req.url === "/forum-model.js" || req.url === "/forum-client.js" || req.url === "/agent-api.js") {
+  } else if (req.url === "/forum-model.js" || req.url === "/forum-client.js" || req.url === "/agent-api.js" || req.url === "/agent-bridge-client.js") {
     res.setHeader("Content-Type", "text/javascript");
     res.end(read(req.url.slice(1)));
   } else if (req.url === "/task-engine.js") {
