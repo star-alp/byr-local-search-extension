@@ -790,7 +790,7 @@ async function waitForRequestTurn(task) {
 }
 
 function updatePerformanceLiveStatus() {
-  let label = "当前空闲";
+  let label = "暂无进行中的任务";
   if (state.onlineSearchRunning) label = `在线搜索 · ${state.onlineActiveWorkers} 个活跃任务`;
   else if (state.indexRunning) label = `更新索引 · ${state.indexActiveWorkers} 个活跃任务`;
   const limits = state.requestPolicy.limits(state.requestConcurrency, state.requestDelayMs);
@@ -957,7 +957,13 @@ function renderIndexCoverage() {
   const latest = rows.reduce((value, item) => Math.max(value, item.lastCheckedAt), 0);
   $("#index-coverage-summary").textContent = `${state.documents.length} 条内容`;
   $("#index-coverage-summary").title = `${totalTopics} 个主题${latest ? ` · 最近 ${formatTime(latest)}` : ""}；状态按当前页数和日期范围判断`;
-  $("#index-coverage-details").hidden = !rows.length;
+  const coverageToggle = $("#index-coverage-details-toggle");
+  const coveragePanel = $("#index-coverage-details");
+  coverageToggle.hidden = !rows.length;
+  if (!rows.length) {
+    coverageToggle.setAttribute("aria-expanded", "false");
+    coveragePanel.hidden = true;
+  }
   $("#index-coverage-list").innerHTML = rows.map((item) =>
     `<div class="index-coverage-row"><span title="${escapeHtml(item.name)}">${escapeHtml(item.description || item.name)}</span><span>${item.topics.size} 主题 · ${item.replies} 回帖</span><span class="coverage-badge is-${item.status.kind}" title="${escapeHtml(item.status.hint)}${item.lastCheckedAt ? `；最近检查 ${escapeHtml(formatTime(item.lastCheckedAt))}` : ""}">${item.status.label}</span></div>`
   ).join("");

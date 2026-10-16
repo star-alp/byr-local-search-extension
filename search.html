@@ -125,12 +125,14 @@
           <summary><span class="summary-title">常用范围</span><span id="scope-presets-summary" class="summary-meta">暂无保存范围</span></summary>
           <div class="details-content">
             <aside class="scope-library" aria-label="推荐与自定义搜索范围">
-              <div class="scope-library-heading"><strong>直接选用</strong><button id="new-scope-preset" class="text-button" type="button">＋ 保存新组合</button></div>
-              <div class="scope-name-row">
-                <label class="sr-only" for="scope-preset-name">搜索范围名称</label>
-                <input id="scope-preset-name" class="input-control" type="text" maxlength="40" placeholder="给当前组合起个名称" autocomplete="off">
-                <button id="save-scope-preset" class="button button-secondary" type="button">保存范围</button>
-                <button id="delete-scope-preset" class="text-button danger-button" type="button" hidden>删除</button>
+              <div class="scope-library-heading">
+                <div class="scope-name-row">
+                  <label class="sr-only" for="scope-preset-name">搜索范围名称</label>
+                  <input id="scope-preset-name" class="input-control" type="text" maxlength="40" placeholder="给当前组合起个名称" autocomplete="off">
+                  <button id="save-scope-preset" class="button button-secondary" type="button">保存范围</button>
+                  <button id="delete-scope-preset" class="text-button danger-button" type="button" hidden>删除</button>
+                </div>
+                <button id="new-scope-preset" class="text-button" type="button">＋ 保存新组合</button>
               </div>
               <p id="scope-preset-feedback" class="scope-feedback" role="status"></p>
               <div id="scope-preset-list" class="scope-preset-list"></div>
@@ -151,7 +153,8 @@
               <div id="index-status" class="progress-status" aria-live="polite"><div class="progress-status-line"><strong id="index-status-summary">尚未建立索引 · 版面 0/0</strong><button id="index-status-details-toggle" class="text-button disclosure-button" type="button" aria-expanded="false" aria-controls="index-status-details" data-status-panel="index-status-details">查看详情</button></div><p id="index-status-details" class="progress-status-details" hidden>主题页 0 · 内容页 0 · 主题 0 · 请求 0 次</p></div>
             </div>
             <div class="index-coverage">
-              <div class="index-coverage-heading"><strong>索引覆盖</strong><span id="index-coverage-summary">尚未建立索引</span><details id="index-coverage-details" hidden><summary>查看版面覆盖</summary><div id="index-coverage-list"></div></details></div>
+              <div class="index-coverage-heading"><strong>索引覆盖</strong><span id="index-coverage-summary">尚未建立索引</span><button id="index-coverage-details-toggle" class="text-button disclosure-button" type="button" aria-expanded="false" aria-controls="index-coverage-details" data-status-panel="index-coverage-details" hidden>查看版面覆盖</button></div>
+              <div id="index-coverage-details" class="index-coverage-details" hidden><div id="index-coverage-list"></div></div>
               <div class="coverage-actions"><button id="fill-index-gaps" class="text-button" type="button" title="刷新主题列表，只补读缺失页面或已变化主题，保留已完成内容">只更新缺口</button></div>
             </div>
             <div class="inline-actions"><button id="retry-index" class="text-button" type="button" hidden>重试失败项</button><button id="new-index" class="text-button" type="button" hidden>重新更新</button></div>
@@ -192,7 +195,7 @@
             <label class="field-label" for="request-concurrency">同时请求数<input id="request-concurrency" class="input-control" type="number" min="1" max="8" value="8"></label>
             <label class="field-label" for="request-delay">请求启动间隔（毫秒）<input id="request-delay" class="input-control" type="number" min="50" max="5000" step="50" value="50"></label>
           </div>
-          <div class="performance-live-row"><span id="performance-live-status">当前空闲</span></div>
+          <div class="performance-live-row"><span id="performance-live-status">暂无进行中的任务</span></div>
           <p class="field-help">并发数控制同时请求量，启动间隔控制每次发起请求的等待时间；异常时会自动重试并暂时降速。</p>
         </div>
       </details>

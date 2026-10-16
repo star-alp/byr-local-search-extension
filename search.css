@@ -54,6 +54,7 @@ h1 { margin: 0; font-size: 21px; letter-spacing: 0; }
 .panel-section.scope-manager { min-width: 0; padding: 0; border-bottom: 0; }
 .scope-library { min-width: 0; margin-bottom: 8px; }
 .scope-library-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; font-size: 12px; }
+.scope-library-heading > #new-scope-preset { flex: 0 0 auto; white-space: nowrap; }
 .scope-preset-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; max-height: 150px; overflow: auto; }
 .scope-preset-item { display: grid; gap: 2px; width: 100%; min-width: 0; border: 1px solid transparent; border-radius: 5px; padding: 6px 7px; background: transparent; color: var(--ink); text-align: left; }
 .scope-preset-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
@@ -62,8 +63,8 @@ h1 { margin: 0; font-size: 21px; letter-spacing: 0; }
 .scope-preset-item.is-active { border-color: #c6dde0; background: #e5f0f1; }
 .scope-editor { min-width: 0; }
 .scope-editor .panel-section { padding: 0; border-bottom: 0; }
-.scope-name-row { display: flex; align-items: center; gap: 6px; }
-.scope-name-row input { flex: 0 1 220px; min-width: 0; font-size: 12px; }
+.scope-name-row { display: flex; flex: 1 1 auto; align-items: center; min-width: 0; gap: 5px; }
+.scope-name-row input { flex: 0 1 150px; min-width: 0; font-size: 12px; }
 .scope-name-row input::placeholder { font-size: 11px; }
 .scope-name-row button { flex: 0 0 auto; font-size: 12px; }
 .scope-name-row .button { height: 28px; padding: 4px 9px; line-height: 1.2; }
@@ -241,13 +242,12 @@ h2 { margin: 0; font-size: 16px; }
 #task-skipped-list a { color: var(--accent); }
 #task-skipped-list button { flex: 0 0 auto; border: 0; padding: 0; background: transparent; color: var(--accent); font-size: 11px; }
 .index-coverage { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
-.index-coverage-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 8px; }
+.index-coverage-heading { display: flex; align-items: baseline; gap: 8px; }
 .index-coverage-heading strong { color: var(--ink); font-size: 12px; }
-.index-coverage-heading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#index-coverage-details { display: contents; }
-#index-coverage-details summary { cursor: pointer; color: var(--accent); }
-#index-coverage-details summary { grid-column: 3; grid-row: 1; }
-#index-coverage-list { display: grid; grid-column: 1 / -1; gap: 4px; max-height: 180px; overflow: auto; margin-top: 5px; }
+.index-coverage-heading span { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.index-coverage-heading .disclosure-button { flex: 0 0 auto; font-size: 11px; white-space: nowrap; }
+.index-coverage-details { margin-top: 4px; }
+#index-coverage-list { display: grid; gap: 4px; max-height: 180px; overflow: auto; }
 .index-coverage-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 7px; }
 .index-coverage-row span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .index-coverage-row span:last-child { flex: 0 0 auto; }
@@ -318,8 +318,9 @@ h2 { margin: 0; font-size: 16px; }
 @media (max-width: 560px) {
   .settings-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 24px); }
   .settings-heading { padding: 12px 14px; }
-  .scope-name-row { flex-wrap: wrap; }
-  .scope-name-row input { flex: 1 1 100%; max-width: none; }
+  .scope-library-heading { gap: 5px; }
+  .scope-name-row { flex-wrap: nowrap; }
+  .scope-name-row input { flex: 1 1 auto; max-width: none; }
   .board-heading-row, .board-actions-row { align-items: flex-start; flex-wrap: wrap; }
   .board-heading-row > .status-dot { margin-left: auto; }
   .index-range-grid { grid-template-columns: 1fr; }
