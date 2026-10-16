@@ -31,15 +31,22 @@ button { cursor: pointer; }
   justify-content: space-between;
   align-items: center;
   gap: 24px;
-  padding: 14px 26px;
+  padding: 10px 24px;
   background: #173d48;
   color: #fff;
 }
 
-h1 { margin: 0; font-size: 21px; letter-spacing: 0; }
-.subtitle { margin: 1px 0 0; color: #c9dadd; font-size: 12px; }
-.subtitle span { margin-left: 7px; color: #f0c78d; font-size: 12px; }
-.forum-link { color: #fff; border-bottom: 1px solid #9dc1c6; padding-bottom: 2px; text-decoration: none; white-space: nowrap; }
+.brand-block { min-width: 0; }
+.brand-line { display: flex; align-items: center; gap: 8px; }
+h1 { margin: 0; font-size: 20px; letter-spacing: 0; }
+.brand-badge { border: 1px solid rgba(240, 199, 141, .55); border-radius: 10px; padding: 1px 5px; color: #f0c78d; font-size: 10px; line-height: 1.3; }
+.subtitle { margin: 0; color: #c9dadd; font-size: 11px; line-height: 1.35; }
+.header-actions { display: flex; align-items: center; gap: 13px; flex: 0 0 auto; }
+.header-status { display: inline-flex; align-items: center; gap: 5px; color: #d6e6e8; font-size: 11px; white-space: nowrap; }
+.header-status::before { width: 6px; height: 6px; border-radius: 50%; background: #f0c78d; content: ""; }
+.header-status.is-ready::before { background: #8fd0aa; }
+.header-status.is-cached::before { background: #f0c78d; }
+.forum-link { color: #fff; border-bottom: 1px solid #9dc1c6; padding-bottom: 2px; font-size: 12px; text-decoration: none; white-space: nowrap; }
 
 .layout { display: grid; grid-template-columns: 430px minmax(0, 1fr); gap: 14px; max-width: 1400px; margin: 22px auto; padding: 0 18px 34px; }
 [hidden] { display: none !important; }
@@ -308,7 +315,7 @@ h2 { margin: 0; font-size: 16px; }
 
 @media (max-width: 1040px) {
   body { min-width: 0; }
-  .app-header { align-items: flex-start; padding: 20px; }
+  .app-header { padding: 12px 20px; }
   .layout { grid-template-columns: 1fr; padding: 0 10px 24px; }
   .control-panel { order: 2; }
   .search-panel { order: 1; padding: 18px 15px; }
@@ -317,6 +324,9 @@ h2 { margin: 0; font-size: 16px; }
 
 @media (max-width: 560px) {
   .settings-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 24px); }
+  .app-header { gap: 10px; padding: 10px 14px; }
+  .header-actions { gap: 8px; }
+  h1 { font-size: 19px; }
   .settings-heading { padding: 12px 14px; }
   .scope-library-heading { gap: 5px; }
   .scope-name-row { flex-wrap: nowrap; }

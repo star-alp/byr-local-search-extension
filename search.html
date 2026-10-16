@@ -11,11 +11,14 @@
 </head>
 <body>
   <header class="app-header">
-    <div>
-      <h1>邮人全搜</h1>
-      <p class="subtitle">北邮人论坛搜索助手 <span>非官方</span></p>
+    <div class="brand-block">
+      <div class="brand-line"><h1>邮人全搜</h1><span class="brand-badge">非官方</span></div>
+      <p class="subtitle">北邮人论坛搜索助手</p>
     </div>
-    <a class="forum-link" href="https://bbs.byr.cn/n/login" target="_blank" rel="noreferrer">打开论坛登录</a>
+    <div class="header-actions">
+      <span id="header-login-state" class="header-status">检查中</span>
+      <a id="forum-link" class="forum-link" href="https://bbs.byr.cn/#!default" target="_blank" rel="noreferrer">打开论坛</a>
+    </div>
   </header>
 
   <main id="app-layout" class="layout">

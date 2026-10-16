@@ -1243,6 +1243,21 @@ function defaultBoardNames() {
   return recommended.length ? recommended : state.boards.slice(0, 10).map((board) => board.name);
 }
 
+function updateConnectionStatus(label, ready = false) {
+  const boardStatus = $("#login-state");
+  boardStatus.textContent = label;
+  boardStatus.classList.toggle("is-ready", ready);
+  const headerStatus = $("#header-login-state");
+  const headerLabel = label === "加载版面" ? "检查中" : label === "使用缓存版面" ? "缓存可用" : ready ? "已连接" : "未连接";
+  headerStatus.textContent = headerLabel;
+  headerStatus.classList.toggle("is-ready", label === "已连接");
+  headerStatus.classList.toggle("is-cached", label === "使用缓存版面");
+  const forumLink = $("#forum-link");
+  const connected = label === "已连接";
+  forumLink.textContent = connected ? "打开论坛" : "登录论坛";
+  forumLink.href = connected ? "https://bbs.byr.cn/#!default" : "https://bbs.byr.cn/n/login";
+}
+
 async function loadBoards(showMessage = false) {
   if (state.boardListLoading) return;
   const hadUsableBoards = state.boards.length > 0;
@@ -1251,8 +1266,7 @@ async function loadBoards(showMessage = false) {
   updateIndexButtonState();
   $("#refresh-boards").disabled = true;
   $("#refresh-boards").textContent = "正在读取版面…";
-  $("#login-state").textContent = "加载版面";
-  $("#login-state").classList.remove("is-ready");
+  updateConnectionStatus("加载版面");
   renderBoardPicker();
   try {
     const result = await requestApi("/n/b/section.json");
@@ -1265,19 +1279,16 @@ async function loadBoards(showMessage = false) {
     await Promise.all(state.boards.map((board) => put("boards", board)));
     state.boardListReady = state.boards.length > 0;
     renderBoardOptions();
-    $("#login-state").textContent = state.boardListReady ? "已连接" : "无可用版面";
-    $("#login-state").classList.toggle("is-ready", state.boardListReady);
+    updateConnectionStatus(state.boardListReady ? "已连接" : "无可用版面", state.boardListReady);
     await refreshResourceUsage();
     if (showMessage) showToast(`已读取 ${state.boards.length} 个版面`);
   } catch (error) {
     if (hadUsableBoards) {
       state.boardListReady = true;
       if (!state.boardTree.length) state.boardTree = cachedBoardTree(state.boards);
-      $("#login-state").textContent = "使用缓存版面";
-      $("#login-state").classList.add("is-ready");
+      updateConnectionStatus("使用缓存版面", true);
     } else {
-      $("#login-state").textContent = "未连接";
-      $("#login-state").classList.remove("is-ready");
+      updateConnectionStatus("未连接");
     }
     throw error;
   } finally {
@@ -2858,10 +2869,9 @@ async function init() {
     await loadBoards();
   } catch (error) {
     if (state.boardListReady) {
-      $("#login-state").textContent = "使用缓存版面";
-      $("#login-state").classList.add("is-ready");
+      updateConnectionStatus("使用缓存版面", true);
     } else {
-      $("#login-state").textContent = "未连接";
+      updateConnectionStatus("未连接");
     }
     showToast(error.message);
   }
