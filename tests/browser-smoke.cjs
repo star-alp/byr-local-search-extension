@@ -202,7 +202,7 @@ const scenario = String.raw`
     assert(!document.querySelector('#scope-presets-details').open, '常用范围应默认折叠，避免干扰手动选择');
     assert(state.activeScopeId === 'current', '旧版自动推断的推荐标签不能作为明确选用模板的记录');
     setBoardSelection(defaultBoardNames());
-    assert(state.activeScopeId === 'current' && document.querySelector('#scope-presets-summary').textContent.includes('手动选择'), '手动配置与推荐完全一致也不能自动切换为模板');
+    assert(state.activeScopeId === 'current' && document.querySelector('#scope-presets-summary').textContent.includes('暂无保存范围'), '手动配置与推荐完全一致也不能自动切换为模板');
     setBoardSelection(['Talking']);
   } else assert(!document.querySelector('#manual-board-details').open, '重新打开已应用预设时应收起手动选择');
   document.querySelector('#index-board-pages').value = '1';

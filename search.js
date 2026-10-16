@@ -579,7 +579,7 @@ function renderScopePresets() {
   }
   const active = scopePreset(state.activeScopeId);
   $("#scope-presets-summary").textContent = active ? `正在使用：${active.name}`
-    : state.scopePresets.length ? `手动选择 · ${state.scopePresets.length} 个已保存组合` : "手动选择 · 可保存组合";
+    : state.scopePresets.length ? `已保存 ${state.scopePresets.length} 个范围` : "暂无保存范围";
   const list = $("#scope-preset-list");
   const presets = [scopePreset("recommended"), ...state.scopePresets];
   const listKey = JSON.stringify([state.activeScopeId, presets]);
