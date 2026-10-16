@@ -78,6 +78,13 @@ async function findTarget(port, url) {
   return target;
 }
 
+function blockedExtensionPageMessage(page, targetUrl) {
+  if (!targetUrl?.startsWith("chrome-extension://")) return "";
+  const text = String(page?.bodyText || "");
+  if (page?.href !== "chrome-error://chromewebdata/" && !/ERR_BLOCKED_BY_CLIENT/u.test(text)) return "";
+  return "当前调试 Chrome 未安装或未启用邮人全搜扩展；CLI 连接到的 Chrome 用户配置与扩展所在配置不同。请在同一个 Chrome 用户配置中安装/加载扩展，并从启动时开启调试端口的浏览器运行 CLI；不要直接在地址栏打开 chrome-extension:// 地址。";
+}
+
 function connectDebugger(url) {
   if (typeof WebSocket !== "function") throw new Error("当前 Node.js 没有内置 WebSocket，请使用 Node.js 22 或更高版本");
   const socket = new WebSocket(url);
@@ -118,7 +125,7 @@ function connectDebugger(url) {
 
 async function invoke(debuggerClient, method, argument) {
   const encoded = argument === undefined ? "undefined" : JSON.stringify(argument);
-  const expression = `(async()=>{const agent=globalThis[${JSON.stringify(AGENT_GLOBAL)}];if(!agent)throw new Error("未找到邮人全搜 Agent API");return await agent[${JSON.stringify(method)}](${encoded});})()`;
+  const expression = `(async()=>{const agent=globalThis[${JSON.stringify(AGENT_GLOBAL)}];if(!agent)return {ok:false,error:{code:"AGENT_UNAVAILABLE",message:"当前 Chrome 页面没有加载邮人全搜 Agent API，请确认扩展已安装在同一个 Chrome 用户配置中，并重新加载扩展页面"}};return await agent[${JSON.stringify(method)}](${encoded});})()`;
   const result = await debuggerClient.evaluate(expression);
   if (!result?.ok) throw new Error(result?.error?.message || `${method} 调用失败`);
   return result;
@@ -169,6 +176,9 @@ async function run(options) {
   const target = await findTarget(port, options.url);
   const client = connectDebugger(target.webSocketDebuggerUrl);
   try {
+    const page = await client.evaluate("({href: location.href, bodyText: document.body?.innerText?.slice(0, 500) || \"\"})");
+    const blockedMessage = blockedExtensionPageMessage(page, target.url);
+    if (blockedMessage) throw new Error(blockedMessage);
     if (options.command === "search") {
       const start = await invoke(client, "startSearch", searchOptions(options));
       if (options.wait || options.watch) output(await waitForResults(client, start, options), options.pretty);
@@ -207,4 +217,4 @@ async function main(argv = process.argv.slice(2)) {
 const isDirect = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isDirect) main();
 
-export { applyChanges, parseArgs, searchOptions, waitForResults };
+export { applyChanges, blockedExtensionPageMessage, parseArgs, searchOptions, waitForResults };

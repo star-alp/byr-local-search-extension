@@ -31,3 +31,11 @@ test("Agent CLI 合并 upsert 和 remove 增量结果", async () => {
   applyChanges(results, [{ id: "a", operation: "remove" }]);
   assert.deepEqual([...results.keys()], ["b"]);
 });
+
+test("Agent CLI 对未安装扩展的调试 Chrome 给出中文诊断", async () => {
+  const file = path.join(__dirname, "..", "agent-cli.mjs");
+  const { blockedExtensionPageMessage, parseArgs } = await import(`file://${file}`);
+  assert.equal(parseArgs(["capabilities", "--port", "9222", "--url", "chrome-extension://<扩展ID>/search.html"]).url, "chrome-extension://<扩展ID>/search.html");
+  assert.match(blockedExtensionPageMessage({ href: "chrome-error://chromewebdata/", bodyText: "ERR_BLOCKED_BY_CLIENT" }, "chrome-extension://<扩展ID>/search.html"), /未安装或未启用邮人全搜扩展/u);
+  assert.equal(blockedExtensionPageMessage({ href: "chrome-extension://<扩展ID>/search.html", bodyText: "" }, "chrome-extension://<扩展ID>/search.html"), "");
+});
