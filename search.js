@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = "byr-local-search";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const PERFORMANCE_PRESETS = Object.freeze({
   stable: { label: "省资源", concurrency: 2, delayMs: 500 },
   fast: { label: "平衡", concurrency: 4, delayMs: 200 },
@@ -25,6 +25,7 @@ const SCOPE_PRESETS_STORAGE_KEY = "byr-search-scope-presets";
 const SEARCH_HISTORY_STORAGE_KEY = "byr-search-history";
 const LANGUAGE_STORAGE_KEY = "byr-search-language";
 const SEARCH_SESSIONS_MAX = 20;
+const TASK_HISTORY_MAX = 50;
 const INDEX_METADATA_STORAGE_KEY = "byr-search-index-metadata";
 const INDEX_COVERAGE_STORAGE_KEY = "byr-search-index-coverage";
 const INDEX_COVERAGE_FRESH_MS = 24 * 60 * 60 * 1000;
@@ -61,6 +62,7 @@ const state = {
   onlineSearchRunning: false,
   onlineRenderTimer: null,
   tasks: { online: null, index: null },
+  taskHistory: [],
   savingOnlineResults: false,
   savingSearchSession: false,
   checkpointTimer: null,
@@ -722,6 +724,7 @@ function openDatabase() {
       }
       if (!db.objectStoreNames.contains("tasks")) db.createObjectStore("tasks", { keyPath: "mode" });
       if (!db.objectStoreNames.contains("sessions")) db.createObjectStore("sessions", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("task-history")) db.createObjectStore("task-history", { keyPath: "id" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -2132,13 +2135,21 @@ function persistTasks() {
     ...ByrTasks.snapshot(task),
     results: task.mode === "online" ? structuredClone(state.onlineDocuments) : []
   }));
-  const writing = state.checkpointWrites.catch(() => {}).then(() => putMany("tasks", snapshots));
+  const summaries = mergeTaskHistory([
+    ...state.taskHistory,
+    ...Object.values(state.tasks).filter(Boolean).map(taskHistorySummary)
+  ]);
+  state.taskHistory = summaries;
+  const writing = state.checkpointWrites.catch(() => {})
+    .then(() => putMany("tasks", snapshots))
+    .then(() => putMany("task-history", summaries));
   state.checkpointWrites = writing;
   return writing;
 }
 
 async function restoreTasks() {
-  const tasks = await getAll("tasks");
+  const [tasks, history] = await Promise.all([getAll("tasks"), getAll("task-history")]);
+  state.taskHistory = mergeTaskHistory(history);
   let restoredOnlineResults = false;
   tasks.forEach((task) => {
     if (!["online", "index"].includes(task.mode) || !Array.isArray(task.jobs)) return;
@@ -2961,7 +2972,8 @@ const AGENT_ERROR_MESSAGES = Object.freeze({
   INVALID_ARGUMENT: { "zh-CN": "参数无效，请检查搜索设置", en: "An argument is invalid. Check the search settings." },
   INVALID_STATE: { "zh-CN": "当前没有可继续的在线搜索任务", en: "There is no online search task that can be resumed." },
   NO_FAILED_JOBS: { "zh-CN": "当前搜索没有可重试的失败请求", en: "The current search has no failed requests to retry." },
-  STALE_SEARCH: { "zh-CN": "搜索标识已失效，请先读取当前状态", en: "The search ID is stale. Read the current status first." }
+  STALE_SEARCH: { "zh-CN": "搜索标识已失效，请先读取当前状态", en: "The search ID is stale. Read the current status first." },
+  TASK_NOT_FOUND: { "zh-CN": "找不到指定的搜索任务", en: "The requested search task was not found." }
 });
 
 function agentUserMessage(error, fallback = "Agent 调用失败，请重试") {
@@ -3039,13 +3051,24 @@ function agentSearchView() {
 
 function agentTaskContext(task) {
   if (!task) return null;
+  return taskHistorySummary(task);
+}
+
+function taskHistorySummary(task) {
   const metrics = ByrTasks.metrics(task);
+  const createdAt = Number(task.createdAt) || Number(task.id?.split?.("-")[0]) || Date.now();
+  const updatedAt = Number(task.updatedAt) || createdAt;
   return {
     id: task.id,
     mode: task.mode,
+    query: task.query || "",
+    boards: task.boards.map((board) => board.name),
     phase: task.phase,
+    active: task.phase === "running",
     pauseRequested: Boolean(task.pauseRequested),
     error: task.error ? agentUserMessage(task.error) : null,
+    createdAt,
+    updatedAt,
     progress: {
       scannedBoards: metrics.boards, totalBoards: metrics.boardTotal,
       boardPages: metrics.boardPages, contentPages: metrics.contentPages,
@@ -3054,6 +3077,26 @@ function agentTaskContext(task) {
       skipped: metrics.skipped
     }
   };
+}
+
+function mergeTaskHistory(entries) {
+  const byId = new Map();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (!entry || typeof entry.id !== "string" || !entry.id || !["online", "index"].includes(entry.mode)) continue;
+    byId.set(entry.id, entry);
+  }
+  return [...byId.values()]
+    .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0))
+    .slice(0, TASK_HISTORY_MAX);
+}
+
+function agentTaskHistory() {
+  const current = Object.values(state.tasks).filter(Boolean).map(taskHistorySummary);
+  return mergeTaskHistory([...state.taskHistory, ...current]);
+}
+
+function agentTask(searchId) {
+  return agentTaskHistory().find((task) => task.id === searchId) || null;
 }
 
 function agentContext() {
@@ -3089,7 +3132,8 @@ function agentContext() {
     },
     tasks: {
       online: agentTaskContext(state.tasks.online),
-      index: agentTaskContext(state.tasks.index)
+      index: agentTaskContext(state.tasks.index),
+      recent: agentTaskHistory().slice(0, 10)
     }
   };
 }
@@ -3208,6 +3252,8 @@ const agentController = ByrAgent.create({
   preview: agentPreview,
   resources: agentResourceUsage,
   failures: agentFailures,
+  tasks: agentTaskHistory,
+  task: agentTask,
   setRequestProfile: setAgentRequestProfile,
   results() {
     const query = agentSearchView().status.query;

@@ -593,6 +593,27 @@ test("Agent 能力说明不会暴露完整正文或账号凭据", () => {
   assert.equal(response.additionalPermissions, false);
   assert.ok(response.methods.startSearch);
   assert.ok(response.url.fields.includes("scope"));
+  assert.ok(response.methods.listTasks);
+  assert.ok(response.methods.getTask);
+});
+
+test("Agent 任务中心只返回轻量摘要并支持按任务标识读取", async () => {
+  const { context, api } = page();
+  const task = context.ByrTasks.create("online", [board], options, "课程资料");
+  task.phase = "partial";
+  task.updatedAt = task.createdAt + 1000;
+  api.state.tasks.online = task;
+  await api.agentController.initialize("");
+  const list = api.agentController.api.listTasks();
+  assert.equal(list.ok, true);
+  assert.equal(list.tasks[0].id, task.id);
+  assert.equal(list.tasks[0].query, "课程资料");
+  assert.deepEqual(list.tasks[0].boards, ["Talking"]);
+  assert.equal(list.tasks[0].jobs, undefined);
+  const detail = api.agentController.api.getTask({ searchId: task.id });
+  assert.equal(detail.ok, true);
+  assert.equal(detail.task.phase, "partial");
+  assert.equal(api.agentController.api.getTask({ searchId: "missing" }).error.code, "TASK_NOT_FOUND");
 });
 
 test("Agent 提供上下文、预览和可校验的任务控制接口", async () => {

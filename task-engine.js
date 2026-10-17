@@ -3,7 +3,8 @@
 globalThis.ByrTasks = (() => {
   const knownJobs = new WeakMap();
   function create(mode, boards, options, query = "") {
-    return { id: String(Date.now()), mode, boards, options, query, jobs: [], phase: "paused", requests: 0, pauseRequested: false };
+    const now = Date.now();
+    return { id: `${now}-${Math.random().toString(36).slice(2, 8)}`, mode, boards, options, query, jobs: [], phase: "paused", requests: 0, pauseRequested: false, createdAt: now, updatedAt: now };
   }
 
   function enqueue(task, job) {

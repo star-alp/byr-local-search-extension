@@ -157,6 +157,8 @@ globalThis.ByrAgent = (() => {
         name: "邮人全搜", globalName: GLOBAL_NAME, transport: "Chrome DevTools Protocol / 本地 Agent Bridge", ready,
         methods: {
           getCapabilities: {}, getStatus: {}, getContext: {}, getResourceUsage: {}, getFailures: {},
+          listTasks: { description: "列出最近任务的轻量摘要，不返回完整任务队列或正文" },
+          getTask: { searchId: "必填；任务标识" },
           previewSearch: { description: "与 startSearch 参数相同，仅评估范围和请求量" }, setRequestProfile: { profile: ["stable", "fast", "high"] },
           listScopes: {}, listBoards: { query: "可选，版面名称或 ID" },
           startSearch: {
@@ -192,6 +194,18 @@ globalThis.ByrAgent = (() => {
       getFailures: guarded(() => {
         requireReady();
         return { failures: adapter.failures ? adapter.failures() : [] };
+      }),
+      listTasks: guarded(() => {
+        requireReady();
+        return { tasks: adapter.tasks ? adapter.tasks() : [] };
+      }),
+      getTask: guarded((options = {}) => {
+        object(options, ["searchId"]);
+        requireReady();
+        if (typeof options.searchId !== "string" || !options.searchId) invalid("请提供任务标识");
+        const task = adapter.task ? adapter.task(options.searchId) : null;
+        if (!task) invalid("找不到指定的搜索任务", "TASK_NOT_FOUND");
+        return { task };
       }),
       previewSearch: guarded((input = {}) => {
         requireReady();
