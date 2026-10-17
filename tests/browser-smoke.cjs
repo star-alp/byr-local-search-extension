@@ -121,6 +121,30 @@ const scenario = String.raw`
   const agentStatus = agentApi.getStatus();
   assert(agentStatus.ok && agentStatus.ready && ['idle', 'complete', 'paused'].includes(agentStatus.status), 'Agent API应返回当前页面的可用状态：' + JSON.stringify(agentStatus));
   assert(document.querySelector('#copy-agent-prompt'), '页面应提供复制 Agent 提示词入口');
+  assert(buildAgentPrompt().includes('--mode auto'), '复制给 AI 的提示词默认应指导本地优先搜索');
+  const onboardingSnapshot = {
+    documents: state.documents,
+    history: state.searchHistory,
+    presets: state.scopePresets,
+    tasks: state.tasks,
+    completed: localStorage.getItem(ONBOARDING_STORAGE_KEY)
+  };
+  state.documents = [];
+  state.searchHistory = [];
+  state.scopePresets = [];
+  state.tasks = { online: null, index: null };
+  localStorage.removeItem(ONBOARDING_STORAGE_KEY);
+  updateOnboarding();
+  assert(!document.querySelector('#onboarding-card').hidden && document.querySelector('.onboarding-steps'), '新用户应看到三步首次使用向导');
+  document.querySelector('#onboarding-dismiss').click();
+  assert(document.querySelector('#onboarding-card').hidden && localStorage.getItem(ONBOARDING_STORAGE_KEY) === '1', '稍后再说应隐藏向导并记住选择');
+  state.documents = onboardingSnapshot.documents;
+  state.searchHistory = onboardingSnapshot.history;
+  state.scopePresets = onboardingSnapshot.presets;
+  state.tasks = onboardingSnapshot.tasks;
+  if (onboardingSnapshot.completed === null) localStorage.removeItem(ONBOARDING_STORAGE_KEY);
+  else localStorage.setItem(ONBOARDING_STORAGE_KEY, onboardingSnapshot.completed);
+  updateOnboarding();
   if (!resume) {
     const notice = document.querySelector('#toast').textContent;
     assert(notice.includes('打开论坛登录') && !notice.includes("haven't login"), '未登录初始化时右下角必须显示中文登录指引');
@@ -308,6 +332,9 @@ const scenario = String.raw`
     document.querySelector('#open-agent-help').click();
     assert(document.querySelector('#agent-help-dialog').matches(':modal') && document.querySelector('#app-layout').inert, 'AI 协助应打开独立模态向导并阻止主界面');
     assert(document.querySelector('#agent-help-command').textContent.includes('agent-cli.mjs setup'), 'AI 协助应显示自动连接命令');
+    document.querySelector('#agent-help-check').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert(document.querySelector('#agent-help-connection').textContent.includes('尚未连接'), '未连接 Bridge 时检查按钮应给出中文下一步提示');
     document.querySelector('#agent-help-close-secondary').click();
     assert(document.querySelector('#agent-help-dialog').hidden && !document.querySelector('#app-layout').inert, '关闭 AI 协助后应恢复主界面');
     document.querySelector('#open-settings').click();

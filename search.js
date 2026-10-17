@@ -24,6 +24,7 @@ const INDEX_OPTIONS_STORAGE_KEY = "byr-search-index-options";
 const SCOPE_PRESETS_STORAGE_KEY = "byr-search-scope-presets";
 const SEARCH_HISTORY_STORAGE_KEY = "byr-search-history";
 const LANGUAGE_STORAGE_KEY = "byr-search-language";
+const ONBOARDING_STORAGE_KEY = "byr-search-onboarding-complete";
 const SEARCH_SESSIONS_MAX = 20;
 const TASK_HISTORY_MAX = 50;
 const INDEX_METADATA_STORAGE_KEY = "byr-search-index-metadata";
@@ -106,6 +107,33 @@ const state = {
 };
 
 const $ = (selector) => document.querySelector(selector);
+
+function completeOnboarding() {
+  localStorage.setItem(ONBOARDING_STORAGE_KEY, "1");
+  const card = $("#onboarding-card");
+  if (card) card.hidden = true;
+}
+
+function updateOnboarding() {
+  const card = $("#onboarding-card");
+  if (!card) return;
+  const hasExistingUse = Boolean(state.documents.length || state.searchHistory.length || state.scopePresets.length || state.tasks.online || state.tasks.index);
+  if (localStorage.getItem(ONBOARDING_STORAGE_KEY) === "1" || hasExistingUse) {
+    if (hasExistingUse) localStorage.setItem(ONBOARDING_STORAGE_KEY, "1");
+    card.hidden = true;
+    return;
+  }
+  const forumReady = Boolean(state.boardListReady && state.boards.length);
+  const bridgeReady = $("#agent-bridge-status")?.classList.contains("is-connected");
+  const selected = state.selectedBoardNames.size;
+  card.hidden = false;
+  $("#onboarding-forum-step").classList.toggle("is-complete", forumReady);
+  $("#onboarding-agent-step").classList.toggle("is-complete", bridgeReady);
+  $("#onboarding-search-step").classList.toggle("is-complete", Boolean(state.searchHistory.length));
+  $("#onboarding-forum-status").textContent = forumReady ? `已读取 ${state.boards.length} 个版面` : "登录后点击左侧“从论坛读取/刷新版面”";
+  $("#onboarding-agent-status").textContent = bridgeReady ? "Agent 已连接，可以直接让 AI 搜索" : "把提示词交给本地 AI，自动完成连接";
+  $("#onboarding-search-status").textContent = selected ? `已选择 ${selected} 个版面，可以开始搜索` : "先在左侧选择至少一个版面";
+}
 
 function loadSavedBoardSelection() {
   try {
@@ -451,6 +479,7 @@ function selectSearchHistory(entry) {
 
 function submitSearch() {
   setSearchHistoryOpen(false);
+  if ($("#query-input").value.trim()) completeOnboarding();
   if (state.searchMode === "online") return startOnlineSearch();
   rememberSearch($("#query-input").value, "local");
   renderResults();
@@ -929,7 +958,7 @@ function agentPageUrl() {
 const AGENT_LOCAL_GUIDANCE = "本地搜索说明：默认先执行 node agent-cli.mjs ask --query \"<关键词>\" --mode auto；它只读取浏览器本地索引，不访问论坛，再由 AI 根据结果决定是否显式执行 --mode online。需要完全离线查询时使用 --mode local，适合多个 AI 或 CLI 并行查询。结果中的 index.lastUpdatedAt 表示索引最近更新时间。在线读取到的主题和回帖会自动增量去重写入本地索引，在线同步和本地查询可以配合使用。";
 
 function buildAgentPrompt() {
-  return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n推荐连接方式：本地 Agent Bridge\n1. 官方 Bridge/CLI 仓库：https://github.com/star-alp/byr-local-search-bridge。Bridge 只监听本机 127.0.0.1，不读取密码、Cookie，也不接收完整正文。\n2. 先检查当前工作目录是否已有 byr-local-search-bridge；如果没有，先克隆该公开仓库并进入目录。不要临时生成未经确认的桥接程序。\n3. 在 Bridge 仓库目录执行：node agent-cli.mjs setup --url "${agentPageUrl()}"。该命令会自动启动 Bridge、生成并保存本地令牌、打开正确的扩展页面；不要让用户手动填写端口或令牌。\n4. 执行 node agent-cli.mjs doctor，确认 Bridge、扩展和 Agent API 均已连接。若未连接，根据中文诊断继续处理，并在需要时刷新扩展页面；如果打开了错误的 Chrome 用户配置，应改为打开安装了邮人全搜的用户配置。\n5. 用户提出搜索需求后，优先执行：node agent-cli.mjs ask --query "<用户关键词>" --scope last-used --limit 20 --pretty。该命令会自动启动在线搜索、等待结果并返回结构化结果；需要边搜索边接收结果时加 --stream。用户没有指定范围时使用 last-used；需要版面或范围时先调用 boards 或 scopes。\n6. 开始大范围搜索前可以执行 node agent-cli.mjs preview --query "<用户关键词>"，查看版面、页数和最低请求量；需要了解当前任务、登录状态和资源占用时执行 node agent-cli.mjs context 或 resources；需要查看失败请求时执行 failures。\n7. 搜索过程中可用 pause、resume、retry 配合 --search-id 暂停、继续或只重试失败请求；先通过 status 或 context 获取当前 searchId。请求强度只能通过 request-profile 选择 stable、fast、high。返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n只有 CLI 无法完成任务时，才调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__ 的 getCapabilities()、getContext()、previewSearch()、startSearch()、getStatus()、getResults() 和任务控制方法进行诊断。不要使用截图或反复点击页面代替 Agent API。\n\n备用连接方式：Chrome DevTools Protocol。只有用户明确允许使用专用调试 Chrome 时，才使用 9222 端口和 agent-cli.mjs；不要尝试接管用户正在运行的普通 Chrome。\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
+  return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n推荐连接方式：本地 Agent Bridge\n1. 官方 Bridge/CLI 仓库：https://github.com/star-alp/byr-local-search-bridge。Bridge 只监听本机 127.0.0.1，不读取密码、Cookie，也不接收完整正文。\n2. 先检查当前工作目录是否已有 byr-local-search-bridge；如果没有，先克隆该公开仓库并进入目录。不要临时生成未经确认的桥接程序。\n3. 在 Bridge 仓库目录执行：node agent-cli.mjs setup --url "${agentPageUrl()}"。该命令会自动启动 Bridge、生成并保存本地令牌、打开正确的扩展页面；不要让用户手动填写端口或令牌。\n4. 执行 node agent-cli.mjs doctor，确认 Bridge、扩展和 Agent API 均已连接。若未连接，根据中文诊断继续处理，并在需要时刷新扩展页面；如果打开了错误的 Chrome 用户配置，应改为打开安装了邮人全搜的用户配置。\n5. 用户提出搜索需求后，先执行：node agent-cli.mjs ask --query "<用户关键词>" --mode auto --scope last-used --limit 20 --pretty。auto 会先查询本地索引并返回结构化结果；本地结果不足时，再由 AI 根据需要执行 --mode online。需要边搜索边接收在线结果时加 --stream。用户没有指定范围时使用 last-used；需要版面或范围时先调用 boards 或 scopes。\n6. 开始大范围搜索前可以执行 node agent-cli.mjs preview --query "<用户关键词>"，查看版面、页数和最低请求量；需要了解当前任务、登录状态和资源占用时执行 node agent-cli.mjs context 或 resources；需要查看失败请求时执行 failures。\n7. 搜索过程中可用 pause、resume、retry 配合 --search-id 暂停、继续或只重试失败请求；先通过 status 或 context 获取当前 searchId。请求强度只能通过 request-profile 选择 stable、fast、high。返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n只有 CLI 无法完成任务时，才调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__ 的 getCapabilities()、getContext()、previewSearch()、startSearch()、getStatus()、getResults() 和任务控制方法进行诊断。不要使用截图或反复点击页面代替 Agent API。\n\n备用连接方式：Chrome DevTools Protocol。只有用户明确允许使用专用调试 Chrome 时，才使用 9222 端口和 agent-cli.mjs；不要尝试接管用户正在运行的普通 Chrome。\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
 }
 
 async function copyText(value) {
@@ -1351,6 +1380,7 @@ function updateConnectionStatus(label, ready = false) {
   const connected = label === "已连接";
   forumLink.textContent = connected ? "打开论坛" : "登录论坛";
   forumLink.href = connected ? "https://bbs.byr.cn/#!default" : "https://bbs.byr.cn/n/login";
+  updateOnboarding();
 }
 
 async function loadBoards(showMessage = false) {
@@ -1444,6 +1474,7 @@ function setBoardSelection(names) {
   renderFlatBoardList();
   renderBoardPicker();
   updateBoardSelectionStatus();
+  updateOnboarding();
 }
 
 function createBoardNode(node, active, onClick) {
@@ -1633,6 +1664,7 @@ function toggleBoardSelection(name) {
   Array.from($("#board-select").options).forEach((option) => { option.selected = state.selectedBoardNames.has(option.value); });
   updateBoardSelectionStatus();
   renderFlatBoardList();
+  updateOnboarding();
 }
 
 function dateInputValue(date) {
@@ -1961,6 +1993,35 @@ function setAgentHelpOpen(open) {
     helpStatus.classList.toggle("is-connected", Boolean(status?.classList.contains("is-connected")));
   }
   setModalOpen(dialog, open);
+}
+
+async function checkAgentConnection() {
+  const button = $("#agent-help-check");
+  const helpStatus = $("#agent-help-connection");
+  const bridgeStatus = $("#agent-bridge-status");
+  if (!button || !helpStatus) return;
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = "检查中…";
+  helpStatus.classList.remove("is-connected");
+  try {
+    if (!globalThis.agentBridgeConnection || !bridgeStatus?.classList.contains("is-connected")) {
+      throw new Error("Agent 尚未连接，请先点击“复制给 AI”，让本地 AI 执行 setup。");
+    }
+    const capabilities = await agentController.api.getCapabilities();
+    if (!capabilities?.ok || !capabilities.ready) {
+      throw new Error("扩展已连接，但 Agent API 尚未准备好，请刷新扩展页面后重试。");
+    }
+    helpStatus.textContent = "Agent 已连接，AI 可以直接搜索";
+    helpStatus.classList.add("is-connected");
+    showToast("Agent 已连接，AI 可以直接搜索");
+  } catch (error) {
+    helpStatus.textContent = error.message || "Agent 尚未连接";
+    showToast(helpStatus.textContent);
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
 }
 
 function updateOnlineSearchControls() {
@@ -2820,11 +2881,18 @@ function bindEvents() {
   $("#fresh-online").addEventListener("click", () => startNewTask("online", true));
   $("#open-settings").addEventListener("click", () => setSettingsOpen(true));
   $("#open-agent-help").addEventListener("click", () => setAgentHelpOpen(true));
+  $("#onboarding-dismiss").addEventListener("click", completeOnboarding);
+  $("#onboarding-open-agent").addEventListener("click", () => setAgentHelpOpen(true));
+  $("#onboarding-focus-search").addEventListener("click", () => {
+    $("#query-input").focus();
+    $("#query-input").scrollIntoView({ block: "center" });
+  });
   $("#copy-agent-prompt").addEventListener("click", copyAgentPrompt);
   $("#close-settings").addEventListener("click", () => setSettingsOpen(false));
   $("#search-settings").addEventListener("cancel", (event) => { event.preventDefault(); setSettingsOpen(false); });
   $("#close-agent-help").addEventListener("click", () => setAgentHelpOpen(false));
   $("#agent-help-close-secondary").addEventListener("click", () => setAgentHelpOpen(false));
+  $("#agent-help-check").addEventListener("click", checkAgentConnection);
   $("#agent-help-dialog").addEventListener("cancel", (event) => { event.preventDefault(); setAgentHelpOpen(false); });
   $("#save-scope-preset").addEventListener("click", saveScopePreset);
   $("#delete-scope-preset").addEventListener("click", deleteScopePreset);
@@ -3369,6 +3437,7 @@ async function init() {
   $("#scope-preset-name").value = state.scopePresets.find((preset) => preset.id === state.editingScopeId)?.name || "";
   renderScopePresets();
   $("#manual-board-details").open = !state.scopePresets.some((preset) => preset.id === state.activeScopeId);
+  updateOnboarding();
   const initialized = await agentController.initialize(window.location.search);
   if (initialized?.command?.bridge && globalThis.ByrAgentBridge) {
     globalThis.agentBridgeConnection = ByrAgentBridge.connect(agentController.api, initialized.command.bridge, (status) => {
@@ -3376,6 +3445,7 @@ async function init() {
       if (!element) return;
       element.textContent = status === "已连接" ? "Agent 已连接" : `Agent ${status}`;
       element.classList.toggle("is-connected", status === "已连接");
+      updateOnboarding();
       const helpStatus = $("#agent-help-connection");
       if (helpStatus) {
         helpStatus.textContent = element.textContent;

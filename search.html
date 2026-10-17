@@ -38,10 +38,13 @@
       </ol>
       <div class="agent-help-command"><span>AI 将自动执行</span><code id="agent-help-command">node agent-cli.mjs setup --url "扩展页面"</code></div>
       <div class="agent-help-connection"><span>当前连接</span><strong id="agent-help-connection">Agent 未连接</strong></div>
+      <div class="agent-help-mode"><strong>默认搜索方式</strong><span>先查本地索引；索引不足时，AI 再决定是否在线搜索。在线读取到的内容会自动写入本地索引。</span></div>
       <div class="agent-help-actions">
         <button id="copy-agent-prompt" class="button button-primary" type="button">复制给 AI</button>
+        <button id="agent-help-check" class="button button-secondary" type="button">检查连接</button>
         <button id="agent-help-close-secondary" class="button button-secondary" type="button">我知道了</button>
       </div>
+      <details class="agent-help-manual"><summary>AI 没有自动连接时怎么办？</summary><ol><li>在 Bridge 仓库目录执行 <code>node agent-cli.mjs setup</code>。</li><li>执行 <code>node agent-cli.mjs doctor</code>，确认扩展已连接。</li><li>重新把提示词交给 AI，或直接使用 <code>ask --mode auto</code>。</li></ol></details>
       <p class="field-help">连接器只监听本机，扩展不保存论坛密码或 Cookie。AI 搜索仍会遵守当前版面和读取范围。</p>
     </div>
   </dialog>
@@ -244,6 +247,17 @@
     </aside>
 
     <section class="search-panel">
+      <section id="onboarding-card" class="onboarding-card" hidden aria-labelledby="onboarding-title">
+        <div class="onboarding-heading">
+          <div><span class="onboarding-kicker">首次使用</span><h2 id="onboarding-title">三步开始搜索</h2><p>先登录论坛，再连接 AI；熟悉后可以直接使用搜索框。</p></div>
+          <button id="onboarding-dismiss" class="text-button" type="button">稍后再说</button>
+        </div>
+        <ol class="onboarding-steps">
+          <li id="onboarding-forum-step" class="onboarding-step"><span class="onboarding-step-number">1</span><div><strong>登录北邮人论坛</strong><p id="onboarding-forum-status">正在检查版面连接</p><a id="onboarding-open-forum" class="onboarding-link" href="https://bbs.byr.cn/n/login" target="_blank" rel="noreferrer">打开论坛登录</a></div></li>
+          <li id="onboarding-agent-step" class="onboarding-step"><span class="onboarding-step-number">2</span><div><strong>连接你的 AI</strong><p id="onboarding-agent-status">把提示词交给本地 AI，自动完成连接。</p><button id="onboarding-open-agent" class="text-button onboarding-link-button" type="button">打开 AI 协助</button></div></li>
+          <li id="onboarding-search-step" class="onboarding-step"><span class="onboarding-step-number">3</span><div><strong>输入关键词并搜索</strong><p id="onboarding-search-status">可以搜索帖子、回帖、用户和版面。</p><button id="onboarding-focus-search" class="text-button onboarding-link-button" type="button">进入搜索框</button></div></li>
+        </ol>
+      </section>
       <div class="search-mode-row">
         <div class="search-mode-switch" role="tablist" aria-label="搜索模式">
           <button id="search-mode-online" class="search-mode-tab is-active" type="button" role="tab" aria-selected="true">在线搜索</button>
