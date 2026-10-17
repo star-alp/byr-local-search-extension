@@ -1,7 +1,7 @@
 /* 邮人全搜扩展侧 Bridge 客户端：由扩展页面主动连接本机 Bridge，并转发已有 Agent API 调用。 */
 
 globalThis.ByrAgentBridge = (() => {
-  const ALLOWED_METHODS = new Set(["getCapabilities", "getStatus", "getContext", "getResourceUsage", "getFailures", "localSearch", "listTasks", "getTask", "previewSearch", "setRequestProfile", "listScopes", "listBoards", "startSearch", "getResults", "pauseSearch", "resumeSearch", "retrySearch", "cancelSearch"]);
+  const ALLOWED_METHODS = new Set(["getCapabilities", "getStatus", "getContext", "getGuide", "getResourceUsage", "getFailures", "localSearch", "listTasks", "getTask", "previewSearch", "setRequestProfile", "listScopes", "listBoards", "startSearch", "getResults", "pauseSearch", "resumeSearch", "retrySearch", "cancelSearch"]);
 
   function connect(api, options, onStatus = () => {}) {
     const port = Number(options?.port);

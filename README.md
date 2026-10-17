@@ -37,6 +37,8 @@ AI 连接成功后，直接说“搜索某个关键词”即可。推荐由 AI �
 node agent-cli.mjs ask --query "关键词" --mode auto --scope last-used --limit 20 --pretty
 ```
 
+如果 AI 需要先了解当前扩展状态，可以执行 `node agent-cli.mjs guide --pretty`。它会一次返回连接、版面范围、索引概况、任务进度和下一步命令，适合 Agent 刚接手或页面刚刷新时使用。
+
 需要强制只查本地索引时使用 `--mode local`；需要从论坛重新读取时使用 `--mode online`。
 
 ## 隐私和数据

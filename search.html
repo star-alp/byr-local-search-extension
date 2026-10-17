@@ -44,7 +44,7 @@
         <button id="agent-help-check" class="button button-secondary" type="button">检查连接</button>
         <button id="agent-help-close-secondary" class="button button-secondary" type="button">我知道了</button>
       </div>
-      <details class="agent-help-manual"><summary>AI 没有自动连接时怎么办？</summary><ol><li>在 Bridge 仓库目录执行 <code>node agent-cli.mjs setup</code>。</li><li>执行 <code>node agent-cli.mjs doctor</code>，确认扩展已连接。</li><li>重新把提示词交给 AI，或直接使用 <code>ask --mode auto</code>。</li></ol></details>
+      <details class="agent-help-manual"><summary>AI 没有自动连接时怎么办？</summary><ol><li>在 Bridge 仓库目录执行 <code>node agent-cli.mjs setup</code>。</li><li>执行 <code>node agent-cli.mjs doctor</code>，确认扩展已连接。</li><li>连接成功后执行 <code>node agent-cli.mjs guide --pretty</code>，让 AI 一次读取当前状态和下一步建议。</li><li>重新把提示词交给 AI，或直接使用 <code>ask --mode auto</code>。</li></ol></details>
       <p class="field-help">连接器只监听本机，扩展不保存论坛密码或 Cookie。AI 搜索仍会遵守当前版面和读取范围。</p>
     </div>
   </dialog>

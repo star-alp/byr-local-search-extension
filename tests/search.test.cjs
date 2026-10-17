@@ -597,6 +597,7 @@ test("Agent 能力说明不会暴露完整正文或账号凭据", () => {
   assert.ok(response.url.fields.includes("scope"));
   assert.ok(response.methods.listTasks);
   assert.ok(response.methods.getTask);
+  assert.ok(response.methods.getGuide);
 });
 
 test("Agent 任务中心只返回轻量摘要并支持按任务标识读取", async () => {
@@ -644,6 +645,10 @@ test("Agent 提供上下文、预览和可校验的任务控制接口", async ()
   assert.equal(started.ok, true);
   const searchId = started.searchId;
   assert.deepEqual(controller.api.getContext().context.request, { concurrency: 8 });
+  const guide = controller.api.getGuide({ query: "课程资料" });
+  assert.equal(guide.ok, true);
+  assert.equal(guide.guide.schemaVersion, 1);
+  assert.ok(guide.guide.next.command.includes("ask"));
   assert.equal(controller.api.getResourceUsage().resources.indexedDocuments, 12);
   assert.equal(controller.api.getFailures().failures[0].page, 2);
   const local = controller.api.localSearch({ query: "课程资料", boards: ["StudyShare"], limit: 1 });

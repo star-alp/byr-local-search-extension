@@ -120,6 +120,8 @@ const scenario = String.raw`
   assert(agentCapabilities.methods.localSearch && agentCapabilities.methods.startSearch.modeNote.includes('auto'), 'Agent API应明确区分无界面本地查询与在线任务');
   const agentStatus = agentApi.getStatus();
   assert(agentStatus.ok && agentStatus.ready && ['idle', 'complete', 'paused'].includes(agentStatus.status), 'Agent API应返回当前页面的可用状态：' + JSON.stringify(agentStatus));
+  const agentGuide = agentApi.getGuide({ query: '课程资料' });
+  assert(agentGuide.ok && agentGuide.guide.schemaVersion === 1 && agentGuide.guide.next && agentGuide.guide.commands.auto.includes('--mode auto'), 'Agent接手引导应一次返回状态和可执行命令');
   assert(document.querySelector('#copy-agent-prompt'), '页面应提供复制 Agent 提示词入口');
   assert(buildAgentPrompt().includes('--mode auto'), '复制给 AI 的提示词默认应指导本地优先搜索');
   const onboardingSnapshot = {

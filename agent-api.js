@@ -156,7 +156,7 @@ globalThis.ByrAgent = (() => {
       getCapabilities: guarded(() => ({
         name: "邮人全搜", globalName: GLOBAL_NAME, transport: "Chrome DevTools Protocol / 本地 Agent Bridge", ready,
         methods: {
-          getCapabilities: {}, getStatus: {}, getContext: {}, getResourceUsage: {}, getFailures: {},
+          getCapabilities: {}, getStatus: {}, getContext: {}, getGuide: {}, getResourceUsage: {}, getFailures: {},
           localSearch: { query: "必填；只读取本地索引，不改变主界面或发起论坛请求", scope: "可选", boards: "可选版面 ID 数组", limit: "1～100，默认 20", index: "返回索引条数与最近更新时间" },
           listTasks: { description: "列出最近任务的轻量摘要，不返回完整任务队列或正文" },
           getTask: { searchId: "必填；任务标识" },
@@ -187,6 +187,12 @@ globalThis.ByrAgent = (() => {
       getContext: guarded(() => {
         requireReady();
         return { context: adapter.context ? adapter.context() : { status: status() } };
+      }),
+      getGuide: guarded((options = {}) => {
+        object(options, ["query"]);
+        if (options.query !== undefined && typeof options.query !== "string") invalid("引导查询关键词必须是字符串");
+        requireReady();
+        return { guide: adapter.guide ? adapter.guide(options) : { schemaVersion: 1, next: { id: "search", command: "node agent-cli.mjs ask --query \"<关键词>\" --mode auto" } } };
       }),
       getResourceUsage: guarded(() => {
         requireReady();
