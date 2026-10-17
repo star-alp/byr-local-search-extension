@@ -117,6 +117,7 @@ const scenario = String.raw`
   const agentApi = window.__BYR_LOCAL_SEARCH_AGENT_V1__;
   const agentCapabilities = agentApi.getCapabilities();
   assert(agentCapabilities.ok && agentCapabilities.apiVersion === 1 && agentCapabilities.results.fullContent === false, 'Agent API应在真实浏览器页面中初始化且不返回完整正文');
+  assert(agentCapabilities.methods.localSearch && agentCapabilities.methods.startSearch.modeNote.includes('auto'), 'Agent API应明确区分无界面本地查询与在线任务');
   const agentStatus = agentApi.getStatus();
   assert(agentStatus.ok && agentStatus.ready && ['idle', 'complete', 'paused'].includes(agentStatus.status), 'Agent API应返回当前页面的可用状态：' + JSON.stringify(agentStatus));
   assert(document.querySelector('#copy-agent-prompt'), '页面应提供复制 Agent 提示词入口');
@@ -128,6 +129,11 @@ const scenario = String.raw`
   }
   assert(state.sessionPages.size === 0 && state.sessionCacheBytes === 0, '页面重新打开不能从持久存储恢复正文会话缓存');
   assert(state.searchMode === 'online', '默认应为在线');
+  const beforeLocalSearch = { query: state.onlineQuery, mode: state.searchMode };
+  const localQuery = String(state.documents.find(doc => doc.board === 'Talking' && doc.content)?.content || '').trim().split(/\s+/u)[0] || '资料';
+  const localOnly = agentApi.localSearch({ query: localQuery, mode: 'local', boards: ['Talking'], timeRange: 'all', limit: 5 });
+  assert(localOnly.ok && localOnly.total >= 1 && localOnly.index.persistent && localOnly.index.documents >= 2, 'Agent 本地查询应返回索引摘要和命中结果：' + JSON.stringify(localOnly));
+  assert(state.onlineQuery === beforeLocalSearch.query && state.searchMode === beforeLocalSearch.mode && !state.onlineSearchRunning, 'Agent 本地查询不能改变主界面或启动在线任务');
   assert(document.querySelector('#search-settings').hidden, '首页设置应折叠');
   const historyInput = document.querySelector('#query-input');
   const historyPopup = document.querySelector('#search-history');
@@ -320,6 +326,9 @@ const scenario = String.raw`
     assert(state.onlineDocuments.length > 0, '暂停前应已显示增量结果');
     const checkpoint = (await getAll('tasks')).find(task => task.mode === 'online');
     assert(checkpoint.phase === 'paused', '进度应持久化');
+    const autoIndexed = await getAll('documents');
+    assert(autoIndexed.some(doc => doc.gid === '7' && doc.contentFetched), '在线读取到的主题正文应自动写入本地索引');
+    assert(autoIndexed.some(doc => doc.id.startsWith('reply:Talking:7:') && doc.contentFetched), '在线读取到的回帖正文应自动写入本地索引');
     sessionStorage.setItem('byr-smoke-resume', JSON.stringify({ counts, fail }));
     location.reload();
     return;
@@ -439,7 +448,8 @@ const scenario = String.raw`
   assert(state.tasks.online.jobs.filter(job => job.kind === 'native' && job.page === 1).length === 3, 'OR 应分别调用中文标题、缩写标题和缩写作者搜索');
   assert(state.tasks.online.cachePages > 0 && document.querySelector('#online-search-status-details').textContent.includes('复用'), '缓存复用应标明节省的内容页');
   const contentRequestCount = () => Object.entries(counts).filter(([key]) => key.startsWith('/n/b/article/')).reduce((sum, [, value]) => sum + value, 0);
-  const indexSizeBeforeCache = (await getAll('documents')).length;
+  const indexBeforeCache = await getAll('documents');
+  const indexSizeBeforeCache = indexBeforeCache.length;
   const requestsBeforeCache = contentRequestCount();
   document.querySelector('#query-input').value = '可复用资料';
   const cachedSearch = startOnlineSearch();
@@ -447,7 +457,9 @@ const scenario = String.raw`
   assert(document.querySelector('#result-list').textContent.includes('缓存预览'), '即时结果应标记缓存来源与获取时间');
   await cachedSearch;
   assert(state.tasks.online.phase === 'complete' && contentRequestCount() === requestsBeforeCache, '未过期正文应复用，但原生搜索与目录继续刷新');
-  assert((await getAll('documents')).length === indexSizeBeforeCache, '会话缓存不能自动写入本地搜索索引');
+  const indexAfterCache = await getAll('documents');
+  assert(indexAfterCache.length === indexSizeBeforeCache, '重复读取会话缓存不能增加本地索引文档');
+  assert(indexAfterCache.some(doc => doc.gid === '7' && doc.contentFetched), '在线已读取正文应继续保留在本地索引');
   omitThread9 = true;
   const changedDirectorySearch = startOnlineSearch();
   assert(state.onlineDocuments.some(doc => doc.gid === '9' && doc.cachePreview), '目录刷新前允许显示注明来源的旧缓存预览');

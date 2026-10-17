@@ -157,12 +157,13 @@ globalThis.ByrAgent = (() => {
         name: "邮人全搜", globalName: GLOBAL_NAME, transport: "Chrome DevTools Protocol / 本地 Agent Bridge", ready,
         methods: {
           getCapabilities: {}, getStatus: {}, getContext: {}, getResourceUsage: {}, getFailures: {},
+          localSearch: { query: "必填；只读取本地索引，不改变主界面或发起论坛请求", scope: "可选", boards: "可选版面 ID 数组", limit: "1～100，默认 20", index: "返回索引条数与最近更新时间" },
           listTasks: { description: "列出最近任务的轻量摘要，不返回完整任务队列或正文" },
           getTask: { searchId: "必填；任务标识" },
           previewSearch: { description: "与 startSearch 参数相同，仅评估范围和请求量" }, setRequestProfile: { profile: ["stable", "fast", "high"] },
           listScopes: {}, listBoards: { query: "可选，版面名称或 ID" },
           startSearch: {
-            query: "必填，支持页面现有搜索语法", mode: ["online（默认）", "local"],
+            query: "必填，支持页面现有搜索语法", mode: ["online（默认）", "local"], modeNote: "auto 由 CLI 映射为无界面 local 优先查询，不是 startSearch 的独立任务模式",
             scope: ["last-used（默认）", "recommended", "saved:<范围 ID>"], boards: "可选，版面 ID 数组，与 scope 互斥",
             boardPages: "1～10000；null 表示全部", threadPages: "1～10000；null 表示全部",
             timeRange: ["all", "30d", "custom"], dateFrom: "YYYY-MM-DD", dateTo: "YYYY-MM-DD",
@@ -194,6 +195,15 @@ globalThis.ByrAgent = (() => {
       getFailures: guarded(() => {
         requireReady();
         return { failures: adapter.failures ? adapter.failures() : [] };
+      }),
+      localSearch: guarded((input = {}) => {
+        object(input, [...SEARCH_FIELDS, "limit"]);
+        requireReady();
+        const limit = integer(input.limit ?? 20, 100);
+        const { limit: _limit, ...searchInput } = input;
+        const options = normalizeOptions({ ...searchInput, mode: "local" });
+        const prepared = adapter.prepare(options, true);
+        return adapter.localSearch ? adapter.localSearch(prepared, { ...options, limit }) : { mode: "local", query: options.query, results: [] };
       }),
       listTasks: guarded(() => {
         requireReady();

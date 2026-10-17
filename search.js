@@ -67,6 +67,7 @@ const state = {
   savingSearchSession: false,
   checkpointTimer: null,
   checkpointWrites: Promise.resolve(),
+  indexWriteQueue: Promise.resolve(),
   checkpointError: "",
   indexActiveWorkers: 0,
   onlineActiveWorkers: 0,
@@ -794,6 +795,26 @@ function saveDocuments(values) {
   });
 }
 
+// 将在线读取和本地索引更新统一写入持久索引，并在内存中同步去重，供本地查询即时使用。
+function persistIndexedDocuments(values) {
+  const incoming = values.filter(Boolean).map((value) => structuredClone(value));
+  if (!incoming.length) return state.indexWriteQueue;
+  const writing = state.indexWriteQueue.catch(() => {}).then(async () => {
+    await saveDocuments(incoming);
+    const documents = new Map(state.documents.map((documentData) => [documentData.id, documentData]));
+    const updatedAt = Date.now();
+    incoming.forEach((documentData) => {
+      const merged = mergeDocument(documents.get(documentData.id), documentData);
+      documents.set(documentData.id, { ...merged, updatedAt });
+    });
+    state.documents = [...documents.values()];
+    scheduleIndexCoverageRender();
+    return incoming.length;
+  });
+  state.indexWriteQueue = writing;
+  return writing;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -905,6 +926,8 @@ function agentPageUrl() {
   return `${base}?${params.toString()}`;
 }
 
+const AGENT_LOCAL_GUIDANCE = "本地搜索说明：默认先执行 node agent-cli.mjs ask --query \"<关键词>\" --mode auto；它只读取浏览器本地索引，不访问论坛，再由 AI 根据结果决定是否显式执行 --mode online。需要完全离线查询时使用 --mode local，适合多个 AI 或 CLI 并行查询。结果中的 index.lastUpdatedAt 表示索引最近更新时间。在线读取到的主题和回帖会自动增量去重写入本地索引，在线同步和本地查询可以配合使用。";
+
 function buildAgentPrompt() {
   return `你正在协助使用“邮人全搜”浏览器扩展。请优先通过程序接口或 CLI 调用扩展，不要反复截图、点击页面或读取完整网页正文。\n\n扩展 Agent 页面：\n${agentPageUrl()}\n\n推荐连接方式：本地 Agent Bridge\n1. 官方 Bridge/CLI 仓库：https://github.com/star-alp/byr-local-search-bridge。Bridge 只监听本机 127.0.0.1，不读取密码、Cookie，也不接收完整正文。\n2. 先检查当前工作目录是否已有 byr-local-search-bridge；如果没有，先克隆该公开仓库并进入目录。不要临时生成未经确认的桥接程序。\n3. 在 Bridge 仓库目录执行：node agent-cli.mjs setup --url "${agentPageUrl()}"。该命令会自动启动 Bridge、生成并保存本地令牌、打开正确的扩展页面；不要让用户手动填写端口或令牌。\n4. 执行 node agent-cli.mjs doctor，确认 Bridge、扩展和 Agent API 均已连接。若未连接，根据中文诊断继续处理，并在需要时刷新扩展页面；如果打开了错误的 Chrome 用户配置，应改为打开安装了邮人全搜的用户配置。\n5. 用户提出搜索需求后，优先执行：node agent-cli.mjs ask --query "<用户关键词>" --scope last-used --limit 20 --pretty。该命令会自动启动在线搜索、等待结果并返回结构化结果；需要边搜索边接收结果时加 --stream。用户没有指定范围时使用 last-used；需要版面或范围时先调用 boards 或 scopes。\n6. 开始大范围搜索前可以执行 node agent-cli.mjs preview --query "<用户关键词>"，查看版面、页数和最低请求量；需要了解当前任务、登录状态和资源占用时执行 node agent-cli.mjs context 或 resources；需要查看失败请求时执行 failures。\n7. 搜索过程中可用 pause、resume、retry 配合 --search-id 暂停、继续或只重试失败请求；先通过 status 或 context 获取当前 searchId。请求强度只能通过 request-profile 选择 stable、fast、high。返回标题、版面、作者、命中类型、摘要和原文链接；不要索要、读取或输出论坛密码、Cookie 或完整正文。清空索引、删除会话、保存结果等修改操作必须先向用户确认。\n\n只有 CLI 无法完成任务时，才调用 window.__BYR_LOCAL_SEARCH_AGENT_V1__ 的 getCapabilities()、getContext()、previewSearch()、startSearch()、getStatus()、getResults() 和任务控制方法进行诊断。不要使用截图或反复点击页面代替 Agent API。\n\n备用连接方式：Chrome DevTools Protocol。只有用户明确允许使用专用调试 Chrome 时，才使用 9222 端口和 agent-cli.mjs；不要尝试接管用户正在运行的普通 Chrome。\n\n搜索过程中可以简洁报告进度，最终以结构化 JSON 或表格返回结果。`;
 }
@@ -928,7 +951,7 @@ async function copyText(value) {
 
 async function copyAgentPrompt() {
   try {
-    await copyText(buildAgentPrompt());
+    await copyText(`${buildAgentPrompt()}\n\n${AGENT_LOCAL_GUIDANCE}`);
     showToast("Agent 提示词已复制，可粘贴给 AI");
   } catch (error) {
     showToast(error.message || "复制失败，请检查浏览器剪贴板权限");
@@ -2195,6 +2218,7 @@ async function executeTaskJob(task, job) {
     if (nativePage.nextPath) ByrTasks.enqueue(task, { kind: "native", board, path: nativePage.nextPath, page: page + 1 });
     const results = nativePage.documents
       .filter((doc) => inIndexTimeRange(doc.time, task.options.timeRange));
+    if (task.mode === "online") await persistIndexedDocuments(results);
     results.forEach((doc) => {
       addOnlineDocument(doc, groups, criteria);
       // 原生搜索找到的历史主题也读取正文，补全快速候选。
@@ -2238,19 +2262,20 @@ async function executeTaskJob(task, job) {
   const documents = readArticleDocuments(board, post, result, task.options.timeRange)
     .map((doc) => ({ ...doc, cachedAt: cached?.fetchedAt || null, fetchedAt, cachePreview: false }));
   if (task.mode === "online") {
-    mergeOnlineDocuments(documents, groups, criteria);
-  } else {
     try {
-      await saveDocuments(documents);
+      await persistIndexedDocuments(documents);
     } catch (error) {
       error.fatal = true;
       throw error;
     }
-    documents.forEach((doc) => {
-      const index = state.documents.findIndex((item) => item.id === doc.id);
-      if (index < 0) state.documents.push(doc);
-      else state.documents[index] = mergeDocument(state.documents[index], doc);
-    });
+    mergeOnlineDocuments(documents, groups, criteria);
+  } else {
+    try {
+      await persistIndexedDocuments(documents);
+    } catch (error) {
+      error.fatal = true;
+      throw error;
+    }
     scheduleOnlineRender();
   }
 }
@@ -2501,11 +2526,17 @@ function searchSourceDocuments() {
   }
 }
 
-function searchDocuments(query, type = state.activeType) {
+function localSearchSource(boards, values) {
+  const range = readIndexTimeRange(values);
+  const selected = new Set(boards);
+  return state.documents.filter((documentData) => selected.has(documentData.board) && inIndexTimeRange(documentData.time, range));
+}
+
+function searchDocuments(query, type = state.activeType, sourceOverride = null) {
   const criteria = parseSearchQuery(query);
   if (!criteria.valid) return [];
   const groups = criteria.groups;
-  const source = searchSourceDocuments();
+  const source = sourceOverride || searchSourceDocuments();
   const candidates = source.filter((documentData) => (type === "all" || documentData.type === type)
     && (!criteria.filters.type.length || criteria.filters.type.includes(documentData.type)));
   return candidates.map((documentData) => {
@@ -2704,8 +2735,7 @@ async function saveOnlineResults() {
   button.disabled = true;
   button.textContent = "正在保存…";
   try {
-    await saveDocuments(documents);
-    state.documents = await getAll("documents");
+    await persistIndexedDocuments(documents);
     await refreshResourceUsage();
     showToast(`已保存 ${documents.length} 条在线结果到本地索引`);
   } catch (error) {
@@ -2986,9 +3016,9 @@ function agentError(code, message) {
 }
 
 function prepareAgentSearch(options, search) {
-  if (state.onlineSearchRunning || state.indexRunning || state.boardListLoading) throw agentError("BUSY", "当前任务正在运行，请等待完成或先停止搜索");
-  if ($("#search-settings").open) throw agentError("SETTINGS_OPEN", "请先关闭更多设置窗口");
   const mode = options.mode || state.searchMode;
+  if (mode !== "local" && (state.onlineSearchRunning || state.indexRunning || state.boardListLoading)) throw agentError("BUSY", "当前任务正在运行，请等待完成或先停止搜索");
+  if (mode !== "local" && $("#search-settings").open) throw agentError("SETTINGS_OPEN", "请先关闭更多设置窗口");
   if (options.query !== undefined && !parseSearchQuery(options.query).valid) throw agentError("INVALID_QUERY", "请检查关键词、OR 或筛选条件");
   if (search && mode === "online" && state.tasks.online?.phase === "paused" && !options.confirm) throw agentError("CONFIRMATION_REQUIRED", "存在暂停的在线任务；替换进度前请设置 confirm: true");
   const scopeId = options.scope === "recommended" ? "recommended" : options.scope?.startsWith("saved:") ? options.scope.slice(6) : "current";
@@ -3224,6 +3254,42 @@ function agentFailures() {
   })));
 }
 
+function agentResultItems(query, source = null) {
+  return searchDocuments(query, "all", source).map(({ documentData: doc, score, matchedFields, terms }) => ({
+    id: doc.id, type: doc.type, title: doc.title || "", board: doc.board, boardDescription: doc.boardDescription || "",
+    author: doc.author || "", authorName: doc.authorName || "", threadId: String(doc.threadId || doc.gid || ""),
+    articleId: doc.articleId ? String(doc.articleId) : null, position: doc.pos ?? 0, time: doc.time ?? null,
+    snippet: getSnippet(doc.content, terms), score, matchedFields, terms,
+    url: threadUrl(doc, terms), provisional: Boolean(doc.cachePreview), fetchedAt: doc.fetchedAt || null
+  }));
+}
+
+function agentIndexSummary() {
+  const lastUpdatedAt = state.documents.reduce((latest, documentData) => Math.max(latest, Number(documentData.updatedAt) || 0), 0);
+  return {
+    documents: state.documents.length,
+    lastUpdatedAt: lastUpdatedAt || null,
+    coverageBoards: Object.keys(state.indexCoverage).length,
+    persistent: true
+  };
+}
+
+function agentLocalSearch(prepared, options) {
+  const source = localSearchSource(prepared.boards, prepared.values);
+  const items = agentResultItems(prepared.query || "", source);
+  const limit = options.limit;
+  return {
+    mode: "local",
+    query: prepared.query || "",
+    scopeId: prepared.scopeId,
+    boards: prepared.boards,
+    index: agentIndexSummary(),
+    scannedDocuments: source.length,
+    total: items.length,
+    results: items.slice(0, limit)
+  };
+}
+
 function setAgentRequestProfile(profile) {
   state.requestPreset = profile;
   state.requestConcurrency = PERFORMANCE_PRESETS[profile].concurrency;
@@ -3252,19 +3318,14 @@ const agentController = ByrAgent.create({
   preview: agentPreview,
   resources: agentResourceUsage,
   failures: agentFailures,
+  localSearch: agentLocalSearch,
   tasks: agentTaskHistory,
   task: agentTask,
   setRequestProfile: setAgentRequestProfile,
   results() {
     const query = agentSearchView().status.query;
     // 程序接口返回独立的正文与回帖命中，不受页面分页、折叠和分类导航影响。
-    return searchDocuments(query, "all").map(({ documentData: doc, score, matchedFields, terms }) => ({
-      id: doc.id, type: doc.type, title: doc.title || "", board: doc.board, boardDescription: doc.boardDescription || "",
-      author: doc.author || "", authorName: doc.authorName || "", threadId: String(doc.threadId || doc.gid || ""),
-      articleId: doc.articleId ? String(doc.articleId) : null, position: doc.pos ?? 0, time: doc.time ?? null,
-      snippet: getSnippet(doc.content, terms), score, matchedFields, terms,
-      url: threadUrl(doc, terms), provisional: Boolean(doc.cachePreview), fetchedAt: doc.fetchedAt || null
-    }));
+    return agentResultItems(query);
   },
   scopes: () => [
     { id: "last-used", name: "当前选择", boards: [...state.selectedBoardNames], options: indexOptionValues() },

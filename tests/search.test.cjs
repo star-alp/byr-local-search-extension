@@ -34,7 +34,7 @@ function page() {
   const agent = fs.readFileSync(path.join(root, "agent-api.js"), "utf8");
   const source = fs.readFileSync(path.join(root, "search.js"), "utf8").replace(/init\(\)\.catch\([\s\S]*$/, "");
   vm.runInContext(fs.readFileSync(path.join(root, "task-engine.js"), "utf8"), context);
-  vm.runInContext(agent + "\n" + model + "\n" + client + "\n" + source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, renderThreadGroup, queryGroups, parseSearchQuery, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument, boardPosts, forumThreadId, ForumClient, coverageStatus, rememberIndexedPages, enqueueIndexedPost, shouldReadIndexedPost, agentController };", context);
+  vm.runInContext(agent + "\n" + model + "\n" + client + "\n" + source + "\nglobalThis.api = { state, mergeDocument, requestApi, addOnlineDocument, matchDocument, searchDocuments, compareResults, userResults, renderResults, groupDocumentResults, renderThreadGroup, queryGroups, parseSearchQuery, nativeSearchPaths, highlight, rememberSessionPage, getSessionPage, mergeOnlineDocuments, buildForumDocument, boardPosts, forumThreadId, ForumClient, coverageStatus, rememberIndexedPages, enqueueIndexedPost, shouldReadIndexedPost, persistIndexedDocuments, agentController };", context);
   return { context, api: context.api };
 }
 
@@ -592,6 +592,8 @@ test("Agent 能力说明不会暴露完整正文或账号凭据", () => {
   assert.equal(response.results.fullContent, false);
   assert.equal(response.additionalPermissions, false);
   assert.ok(response.methods.startSearch);
+  assert.ok(response.methods.localSearch);
+  assert.match(response.methods.startSearch.modeNote, /auto.*CLI.*local/u);
   assert.ok(response.url.fields.includes("scope"));
   assert.ok(response.methods.listTasks);
   assert.ok(response.methods.getTask);
@@ -627,6 +629,7 @@ test("Agent 提供上下文、预览和可校验的任务控制接口", async ()
     context: () => ({ connection: { ready: true }, request: { concurrency: 8 } }),
     resources: () => ({ indexedDocuments: 12, indexBytes: 1024 }),
     failures: () => [{ mode: "online", page: 2 }],
+    localSearch: (prepared, options) => ({ mode: "local", query: prepared.query, scopeId: prepared.scopeId, index: { documents: 12, lastUpdatedAt: 1234 }, scannedDocuments: 12, total: 1, results: [{ id: "local-1", score: 2 }], limit: options.limit }),
     setRequestProfile: (profile) => ({ profile, concurrency: 8, intervalMs: 50 }),
     prepare: (options) => ({ ...options, mode: "online", boards: ["StudyShare"] }),
     preview: () => ({ boards: ["StudyShare"], requests: { fixedDiscoveryMaximum: 2 } }),
@@ -643,6 +646,11 @@ test("Agent 提供上下文、预览和可校验的任务控制接口", async ()
   assert.deepEqual(controller.api.getContext().context.request, { concurrency: 8 });
   assert.equal(controller.api.getResourceUsage().resources.indexedDocuments, 12);
   assert.equal(controller.api.getFailures().failures[0].page, 2);
+  const local = controller.api.localSearch({ query: "课程资料", boards: ["StudyShare"], limit: 1 });
+  assert.equal(local.ok, true, JSON.stringify(local));
+  assert.equal(local.mode, "local");
+  assert.equal(local.index.documents, 12);
+  assert.equal(local.results[0].id, "local-1");
   assert.equal(controller.api.setRequestProfile({ profile: "high" }).request.profile, "high");
   assert.equal(controller.api.previewSearch({ query: "课程资料" }).preview.requests.fixedDiscoveryMaximum, 2);
   assert.equal(controller.api.pauseSearch({ searchId }).ok, true);
